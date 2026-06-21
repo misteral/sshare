@@ -1,7 +1,7 @@
 # sshare — Product Requirements Document
 
 > **Status:** Draft v0.1 · **Owner:** a.bobrov@g-concordia.com · **Date:** 2026-06-21
-> **Company:** GCS — Global Concordia Solutions
+> **Author:** Bobrov Aleksandr
 
 ## 1. One-liner
 

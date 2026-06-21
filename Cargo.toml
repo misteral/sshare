@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 description = "Share team secrets with SSH keys: encrypt to public keys, decrypt with your private key."
 license = "MIT"
-repository = "https://github.com/global-concordia-solutions/sshare"
+repository = "https://github.com/misteral/sshare"
 
 [dependencies]
 age = { version = "0.11.3", features = ["ssh"] }

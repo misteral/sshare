@@ -108,4 +108,4 @@ cargo fmt
 
 ## License
 
-MIT © Global Concordia Solutions
+MIT © Bobrov Aleksandr
