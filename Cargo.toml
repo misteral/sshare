@@ -1,0 +1,24 @@
+[package]
+name = "sshare"
+version = "0.1.0"
+edition = "2024"
+description = "Share team secrets with SSH keys: encrypt to public keys, decrypt with your private key."
+license = "MIT"
+repository = "https://github.com/global-concordia-solutions/sshare"
+
+[dependencies]
+age = { version = "0.11.3", features = ["ssh"] }
+anyhow = "1.0.102"
+clap = { version = "4.6.1", features = ["derive"] }
+rpassword = "7.5.4"
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints.rust]
+missing_debug_implementations = "warn"
+unsafe_op_in_unsafe_fn = "warn"
+
+[lints.clippy]
+all = "warn"
+pedantic = "warn"
