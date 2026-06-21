@@ -35,6 +35,7 @@ secrets/
 
 ```sh
 brew tap misteral/sshare https://github.com/misteral/sshare
+brew trust misteral/sshare   # Homebrew 6+ requires trusting third-party taps
 brew install sshare
 ```
 
