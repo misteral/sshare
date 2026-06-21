@@ -27,6 +27,20 @@ Requires Rust 1.85+ (the crate uses **edition 2024**; current toolchain is 1.96)
 Tests live inside `src/*.rs` under `#[cfg(test)]` — this is a binary crate, so there is
 no `tests/` directory and no `--lib`.
 
+## CI & release
+
+- **CI** (`.github/workflows/ci.yml`) runs on push to `main` and PRs: `fmt --check`,
+  `clippy --all-targets -- -D warnings` (so pedantic lints fail the build), and `cargo
+  test` on Linux + macOS. Keep it green; `--locked` means `Cargo.lock` must be committed
+  and current.
+- **Release** (`.github/workflows/release.yml`) fires on a `v*` tag. It cross-builds four
+  targets (macOS Intel/ARM, Linux x86_64/aarch64), publishes a GitHub Release with
+  tarballs + `.sha256`, and **regenerates `Formula/sshare.rb` and commits it back to
+  `main`**. To cut a release: add a `## [x.y.z]` section to `CHANGELOG.md`, bump
+  `Cargo.toml` version, then `git tag vX.Y.Z && git push origin vX.Y.Z`.
+- `Formula/sshare.rb` is a generated artifact — edit the heredoc in `release.yml`, not the
+  formula directly. Its checksums are placeholders until the first tag fills them in.
+
 ## Architecture
 
 Strict one-directional layering — **`main.rs` → `vault.rs` → `crypto.rs`**, never the

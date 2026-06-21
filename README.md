@@ -1,5 +1,7 @@
 # sshare
 
+[![CI](https://github.com/misteral/sshare/actions/workflows/ci.yml/badge.svg)](https://github.com/misteral/sshare/actions/workflows/ci.yml)
+
 Share team secrets — passwords, API tokens, `.env` files — using the **SSH keys your
 team already has**. Secrets are encrypted to members' SSH **public** keys and stored in
 a shared git repository; a secret can only be decrypted by someone holding a matching
@@ -28,6 +30,22 @@ secrets/
 - Commit the repo and `git push`; teammates `git pull` to sync.
 
 ## Install
+
+### Homebrew
+
+```sh
+brew tap misteral/sshare https://github.com/misteral/sshare
+brew install sshare
+```
+
+### Prebuilt binary
+
+Download a tarball for your platform from the
+[latest release](https://github.com/misteral/sshare/releases/latest) and put `sshare`
+on your `PATH`. Each release ships macOS (Intel + Apple Silicon) and Linux (x86_64 +
+aarch64) builds plus `.sha256` checksums.
+
+### From source
 
 ```sh
 cargo install --path .
