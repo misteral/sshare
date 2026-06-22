@@ -21,15 +21,22 @@ cargo test vault::tests               # a module's tests
 
 ## Test layout
 
-This is a **binary crate**, so there is no `tests/` directory and no `--lib`. Tests live
-inline under `#[cfg(test)] mod tests` in each source file:
+**Unit tests** live inline under `#[cfg(test)] mod tests` in each source file (this is a
+binary crate, so there is no `--lib`):
 
 - `crypto.rs` — round-trip with matching key, wrong-key rejection, multi-recipient decrypt,
-  empty-recipients error, invalid-pubkey rejection.
+  empty-recipients error, invalid-pubkey rejection, and unreadable-key error messages
+  (legacy-PEM → convert hint, `.pub`-path hint).
 - `vault.rs` — init layout + double-init rejection, member add/list/remove, invalid-key
-  rejection, nested+sorted secret listing, **path-traversal rejection**.
-- `test_keys.rs` — throwaway ed25519 keypairs (`ALICE`, `MALLORY`) used by the above.
+  rejection, nested+sorted secret listing, **path-traversal rejection**, atomic write
+  (overwrite + no temp leftover).
+- `test_keys.rs` — throwaway ed25519 keypairs (`ALICE`, `MALLORY`) plus a legacy EC-PEM key.
   These are NOT real credentials and are compiled only under `#[cfg(test)]`.
+
+**Integration tests** live in `tests/cli.rs` — they spawn the built binary
+(`env!("CARGO_BIN_EXE_sshare")`) and drive the real CLI through `init → member add → add →
+get → ls`, plus the `.pub`-path error case. They embed their own throwaway ed25519 key
+(crate-internal `test_keys` isn't visible to integration tests).
 
 ## Writing tests
 
@@ -43,8 +50,8 @@ inline under `#[cfg(test)] mod tests` in each source file:
 
 ## Manual / end-to-end testing
 
-There is no automated CLI integration test yet (see
-[QUALITY_SCORE.md](QUALITY_SCORE.md)). To exercise the real flow in a throwaway dir:
+The automated end-to-end flow lives in `tests/cli.rs` (above). To exercise it interactively
+in a throwaway dir against your own key:
 
 ```sh
 cd "$(mktemp -d)"

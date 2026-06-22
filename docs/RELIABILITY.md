@@ -11,13 +11,12 @@
 - `rekey` decrypts each secret with the caller's key before re-encrypting; if the caller is
   not a recipient of some secret it fails with a clear, secret-named error rather than
   producing a corrupt blob.
+- **Secret writes are atomic.** `Vault::write_secret` writes to a same-directory temp file
+  and renames it over the target, so a reader (or an interrupted `add`/`rekey`) never
+  observes a half-written `.age` file.
 
 ## Known reliability gaps
 
-- **Writes are not atomic.** `Vault::write_secret` does `fs::write` directly, so an
-  interrupted `add`/`rekey` could leave a truncated `.age` file. For a git-backed store
-  this is recoverable (`git checkout`), but the robust fix is write-to-temp-then-rename.
-  Tracked in [exec-plans/tech-debt-tracker.md](exec-plans/tech-debt-tracker.md).
 - **`rekey` is not transactional** across secrets — a failure midway leaves some secrets
   re-encrypted and some not. It is idempotent (safe to re-run), which is the current
   mitigation.

@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Secret writes are now atomic (temp file + rename), so an interrupted `add`/`rekey` never
+  leaves a half-written secret on disk.
+
 ## [0.1.1] - 2026-06-22
 
 ### Fixed
