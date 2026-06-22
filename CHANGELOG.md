@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `get`/`rekey` now give actionable errors when an SSH key can't be read instead of a
+  cryptic "cannot parse SSH key": legacy PEM keys suggest converting with `ssh-keygen -p`,
+  pointing `--identity` at a `.pub` file is called out, and unsupported key types name the
+  supported ones (ed25519, rsa).
+
 ## [0.1.0] - 2026-06-21
 
 ### Added
