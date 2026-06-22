@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-06-22
+
 ### Fixed
 
 - `get`/`rekey` now give actionable errors when an SSH key can't be read instead of a
@@ -30,5 +32,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `sshare rekey` — re-encrypt every secret for the current member set.
 - Path-traversal-safe, nestable secret names (e.g. `prod/api-token`).
 
-[Unreleased]: https://github.com/misteral/sshare/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/misteral/sshare/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/misteral/sshare/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/misteral/sshare/releases/tag/v0.1.0
