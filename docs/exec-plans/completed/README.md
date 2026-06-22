@@ -4,4 +4,5 @@ Archived plans, kept so a later agent can reason about earlier decisions without
 human to re-supply context. Move a plan here from `../active/` when its sub-tasks are done;
 append an outcome note (what shipped, what changed vs the plan).
 
-_None archived yet._
+- [connected-vaults.md](connected-vaults.md) — vault registry + `connect`/`disconnect`/
+  `vaults` + `--vault` (shipped in v0.1.3).

@@ -67,7 +67,16 @@ impl Vault {
     /// Returns an error if no `.sshare/` folder is found in any ancestor directory.
     pub(crate) fn discover() -> Result<Self> {
         let start = std::env::current_dir().context("cannot determine current directory")?;
-        let mut dir = start.as_path();
+        Self::find_from(&start)
+    }
+
+    /// Finds the vault containing `start` by walking up parent directories.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no `.sshare/` folder is found in any ancestor of `start`.
+    pub(crate) fn find_from(start: &Path) -> Result<Self> {
+        let mut dir = start;
         loop {
             if dir.join(VAULT_DIR).join(CONFIG_FILE).is_file() {
                 return Ok(Self {
@@ -79,6 +88,23 @@ impl Vault {
                 None => bail!("not inside an sshare vault; run 'sshare init' first"),
             }
         }
+    }
+
+    /// Opens the vault rooted exactly at `dir` (no walking up).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `dir` is not an sshare vault.
+    pub(crate) fn open(dir: &Path) -> Result<Self> {
+        if !dir.join(VAULT_DIR).join(CONFIG_FILE).is_file() {
+            bail!(
+                "{} is not an sshare vault (no {VAULT_DIR}/{CONFIG_FILE})",
+                dir.display()
+            );
+        }
+        Ok(Self {
+            root: dir.to_path_buf(),
+        })
     }
 
     /// Returns the vault root directory.
@@ -298,6 +324,14 @@ mod tests {
         assert!(dir.path().join(".sshare/members").is_dir());
         assert!(dir.path().join("secrets").is_dir());
         assert!(Vault::init(dir.path()).is_err());
+    }
+
+    #[test]
+    fn open_requires_a_vault_at_the_exact_path() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(Vault::open(dir.path()).is_err()); // empty dir is not a vault
+        Vault::init(dir.path()).unwrap();
+        assert!(Vault::open(dir.path()).is_ok());
     }
 
     #[test]

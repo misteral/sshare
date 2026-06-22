@@ -7,16 +7,17 @@ members' SSH **public** keys (via the embedded [`age`](https://github.com/FiloSo
 format) and storing the ciphertext in a git repo. Only a matching SSH **private** key can
 decrypt — that *is* the access control. No server, no accounts, no external `age`/`gpg`.
 
-It is a small crate (~700 lines of logic across 4 source files). The whole program is a
-clap-driven command dispatcher over a `Vault` abstraction backed by the filesystem.
+It is a small crate (~5 source files). The whole program is a clap-driven command
+dispatcher over a `Vault` abstraction backed by the filesystem.
 
 ## Module map
 
 | Module | Responsibility | Imports `age`? |
 |---|---|---|
-| `src/main.rs` | clap CLI, all stdin/stdout/file I/O, `~/.ssh` default-key resolution, one thin `cmd_*` per subcommand | no |
-| `src/vault.rs` | `Vault` type: on-disk layout, member files, secret blobs, name validation | only to build recipients |
+| `src/main.rs` | clap CLI, all stdin/stdout/file I/O, `~/.ssh` default-key resolution, **vault resolution** (`resolve_vault`), one thin `cmd_*` per subcommand | no |
+| `src/vault.rs` | `Vault` type: on-disk layout, member files, secret blobs, name validation; `discover`/`find_from`/`open` | only to build recipients |
 | `src/crypto.rs` | `encrypt` / `decrypt` / `parse_recipient`, passphrase prompt — the only place `age` types live | **yes (exclusively)** |
+| `src/registry.rs` | `Registry` of *connected* vaults (name → local path) in the user's config dir; `connect`/`disconnect`/`list`/`path_of` | no |
 | `src/test_keys.rs` | throwaway ed25519 keypairs, `#[cfg(test)]` only — never compiled into the binary | no |
 
 ## Dependency rules
@@ -47,8 +48,24 @@ parent directories looking for `.sshare/config.toml`.
 ```
 
 The repo itself is the transport: users `git commit` + `git push`/`pull`. **The CLI does
-no git operations** — see [SECURITY.md](SECURITY.md) and the note in
-[design-docs/index.md](design-docs/index.md).
+no git operations and no network I/O** — see [SECURITY.md](SECURITY.md) and the note in
+[design-docs/index.md](design-docs/index.md). This holds even for `connect`, which only
+*registers* an already-cloned local repo (see below).
+
+## Vault resolution & the connected-vault registry
+
+A second, machine-global piece of state lives **outside** any vault: a registry of
+*connected* vaults at `$SSHARE_CONFIG_HOME` / `$XDG_CONFIG_HOME/sshare` / `~/.config/sshare`
+(`src/registry.rs`). It is a dependency-free `name<TAB>path` file holding **only names and
+local paths — no secrets, no git**. It exists so an agent or user can target a vault by name
+from anywhere instead of searching the filesystem.
+
+`main::resolve_vault` is the single entry point every vault-using command goes through; its
+order is: `--vault <name>` / `$SSHARE_VAULT` → registry lookup → `Vault::discover()` from
+cwd (legacy behavior) → the only connected vault → else an error listing connected vaults.
+`init` and `connect` write the registry — the **only** writes sshare makes outside a vault.
+`connect` registers an existing local vault (it does not clone); `disconnect` only
+unregisters and never deletes files.
 
 ## Key data flows
 

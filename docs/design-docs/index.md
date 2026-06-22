@@ -5,6 +5,7 @@ Design decisions and the beliefs behind them.
 | Title | Status | Date | File |
 |---|---|---|---|
 | Core Beliefs | Active | 2026-06-21 | [core-beliefs.md](core-beliefs.md) |
+| Connected Vaults | Active | 2026-06-22 | [connected-vaults.md](connected-vaults.md) |
 
 ## Decisions captured elsewhere (and where)
 

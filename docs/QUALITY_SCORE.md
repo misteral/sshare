@@ -9,7 +9,8 @@ _Last reviewed: 2026-06-22 (post v0.1.1)._
 |---|---|---|
 | `src/crypto.rs` | A | `age` isolated here; round-trip, wrong-key, multi-recipient, and unreadable-key (legacy-PEM / `.pub`) paths tested. Gap: the `PassphrasePrompt` callback (encrypted-key path) is not unit-tested. |
 | `src/vault.rs` | A | Path-traversal guard, init/member/secret flows, and **atomic write** (no temp leftover) all tested. |
-| `src/main.rs` | A− | Now covered by an end-to-end CLI test (`tests/cli.rs`: `init → member add → add → get → ls`). Gap: `~/.ssh` default-key resolution still has no direct test (the e2e test passes explicit `--key`/`--identity`). |
+| `src/main.rs` | A− | Covered by end-to-end CLI tests (`tests/cli.rs`: core flow + connect/`--vault`/disconnect). Gap: `~/.ssh` default-key resolution still has no direct test (tests pass explicit `--key`/`--identity`). |
+| `src/registry.rs` | A | Connected-vault registry; `connect`/`disconnect`/lookup/idempotency/invalid-name/missing-file all unit-tested (via `load_from(tempdir)`), plus the e2e `connect`→`--vault`→`disconnect` path. |
 | `src/test_keys.rs` | n/a | Test-only fixtures (`#[cfg(test)]`). |
 | `.github/workflows/*` | B | CI + release work and are exercised (v0.1.0/v0.1.1 shipped). Gaps: actions pinned by major tag not SHA; Node 20 deprecation warnings; no build-provenance/signing. |
 
