@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Connected-vault registry so a vault can be used by name from anywhere:
+  - `sshare connect [<path>] [--name <n>]` registers an existing local vault (it does **not**
+    clone — sshare still runs no git and no network); `sshare init` auto-connects.
+  - `sshare disconnect <name>` unregisters (never deletes files); `sshare vaults` lists them.
+  - A global `--vault <name>` flag (and `SSHARE_VAULT` env) targets a connected vault;
+    otherwise the vault in the current directory is used, as before.
+  - Registry lives in `~/.config/sshare/vaults` (honors `$XDG_CONFIG_HOME` /
+    `$SSHARE_CONFIG_HOME`) and stores only names and local paths — never secrets.
+
 ## [0.1.2] - 2026-06-22
 
 ### Fixed

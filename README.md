@@ -89,7 +89,10 @@ export DB_PASSWORD="$(sshare get db-prod)"
 
 | Command | Description |
 |---|---|
-| `sshare init` | Create a vault in the current directory. |
+| `sshare init` | Create a vault in the current directory (and connect it). |
+| `sshare connect [<path>] [--name <n>]` | Register an existing local vault so you can use it by name from anywhere. |
+| `sshare disconnect <name>` | Unregister a connected vault (does not delete files). |
+| `sshare vaults` | List connected vaults. |
 | `sshare member add <name> [--key <path\|->]` | Register a member's SSH public key. |
 | `sshare member ls` | List members. |
 | `sshare member rm <name>` | Remove a member (then run `rekey`). |
@@ -97,6 +100,25 @@ export DB_PASSWORD="$(sshare get db-prod)"
 | `sshare get <name> [--identity <path>]` | Decrypt a secret to stdout. |
 | `sshare ls` | List stored secrets. |
 | `sshare rekey [--identity <path>]` | Re-encrypt all secrets for the current members. |
+
+Any command that operates on a vault also accepts a global **`--vault <name>`** (or the
+`SSHARE_VAULT` env var) to target a connected vault from anywhere — otherwise sshare uses
+the vault containing the current directory.
+
+## Connected vaults
+
+So you don't have to `cd` into a vault (or hunt for it) every time, sshare keeps a small
+registry of vaults you've connected, in `~/.config/sshare/vaults` (honors
+`$XDG_CONFIG_HOME` / `$SSHARE_CONFIG_HOME`). It stores **only names and local paths — never
+secrets, never git remotes**. `connect` registers a vault you've **already cloned** — sshare
+itself never runs git or touches the network.
+
+```sh
+git clone git@github.com:team/secrets.git   # you clone it the normal way
+sshare connect ./secrets --name team        # register it (init does this automatically)
+sshare vaults                               # team   ok   /abs/path/to/secrets
+sshare get db-prod --vault team > .env       # use it from anywhere, no cd
+```
 
 ## Security notes
 
