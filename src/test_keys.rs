@@ -26,3 +26,18 @@ AAAEBVsdeSzRdkkd8fr14IWBArsCgW7t08rPO18bSF+pzFf+zxHqUFE7nQV4hAGBe4RGkx
 ZkdsvpzZhmDViwK/HW+zAAAAE21hbGxvcnlAc3NoYXJlLXRlc3QBAg==
 -----END OPENSSH PRIVATE KEY-----
 ";
+
+/// A legacy PEM-format ECDSA key — the kind `age` cannot parse. Used to verify that
+/// `crypto::decrypt` emits an actionable "convert your key" error rather than a cryptic one.
+pub(crate) const ECDSA_PEM_KEY: &str = "\
+-----BEGIN EC PRIVATE KEY-----
+MIIBaAIBAQQgG1/eFPmqLkamByjcdKxbi5Jau4cP2hDteqSMW5m+ryaggfowgfcC
+AQEwLAYHKoZIzj0BAQIhAP////8AAAABAAAAAAAAAAAAAAAA////////////////
+MFsEIP////8AAAABAAAAAAAAAAAAAAAA///////////////8BCBaxjXYqjqT57Pr
+vVV2mIa8ZR0GsMxTsPY7zjw+J9JgSwMVAMSdNgiG5wSTamZ44ROdJreBn36QBEEE
+axfR8uEsQkf4vOblY6RA8ncDfYEt6zOg9KE5RdiYwpZP40Li/hp/m47n60p8D54W
+K84zV2sxXs7LtkBoN79R9QIhAP////8AAAAA//////////+85vqtpxeehPO5ysL8
+YyVRAgEBoUQDQgAEhZaTwIo/92ALWoC0OA1ABmCEj8XP0cou6ozr7mT4FhI8ihHA
+GobJdhUtbD3etWKviqk0jBHZSm8yxO5cn7IYLw==
+-----END EC PRIVATE KEY-----
+";
