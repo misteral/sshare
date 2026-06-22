@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-06-23
+
 ### Added
 
 - Connected-vault registry so a vault can be used by name from anywhere:
@@ -50,7 +52,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `sshare rekey` — re-encrypt every secret for the current member set.
 - Path-traversal-safe, nestable secret names (e.g. `prod/api-token`).
 
-[Unreleased]: https://github.com/misteral/sshare/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/misteral/sshare/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/misteral/sshare/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/misteral/sshare/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/misteral/sshare/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/misteral/sshare/releases/tag/v0.1.0
