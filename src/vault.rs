@@ -197,6 +197,10 @@ impl Vault {
 
     /// Writes an encrypted blob for `name`, creating parent directories as needed.
     ///
+    /// The write is atomic: the blob is written to a temporary file in the same directory
+    /// and then renamed over the target, so a reader (or an interrupted run) never observes
+    /// a half-written secret.
+    ///
     /// # Errors
     ///
     /// Returns an error if `name` is invalid or the file cannot be written.
@@ -206,7 +210,14 @@ impl Vault {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        fs::write(&path, blob).with_context(|| format!("cannot write {}", path.display()))?;
+        // Same-directory temp keeps the rename on one filesystem (atomic on Unix); the pid
+        // suffix avoids collisions between concurrent writers.
+        let tmp = path.with_extension(format!("{SECRET_EXT}.tmp.{}", std::process::id()));
+        fs::write(&tmp, blob).with_context(|| format!("cannot write {}", tmp.display()))?;
+        if let Err(e) = fs::rename(&tmp, &path) {
+            let _ = fs::remove_file(&tmp);
+            return Err(e).with_context(|| format!("cannot write {}", path.display()));
+        }
         Ok(())
     }
 
@@ -325,6 +336,25 @@ mod tests {
         );
         assert_eq!(vault.read_secret("prod/api-token").unwrap(), b"b");
         assert!(vault.read_secret("missing").is_err());
+    }
+
+    #[test]
+    fn write_secret_overwrites_and_leaves_no_temp_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = Vault::init(dir.path()).unwrap();
+        vault.write_secret("api", b"v1").unwrap();
+        vault.write_secret("api", b"v2").unwrap(); // atomic overwrite
+        assert_eq!(vault.read_secret("api").unwrap(), b"v2");
+
+        let leftovers: Vec<_> = std::fs::read_dir(dir.path().join("secrets"))
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|n| n.contains(".tmp."))
+            .collect();
+        assert!(
+            leftovers.is_empty(),
+            "temp files left behind: {leftovers:?}"
+        );
     }
 
     #[test]
