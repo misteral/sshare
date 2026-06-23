@@ -200,6 +200,14 @@ cargo fmt --all -- --check                           # formatting is a CI gate
 
 Contributor and agent docs live in [`AGENTS.md`](./AGENTS.md) and [`docs/`](./docs).
 
+## Claude Code skill
+
+This repo ships a [Claude Code](https://claude.ai/code) skill at
+[`.claude/skills/sshare/`](.claude/skills/sshare/) that teaches an agent to operate sshare —
+install, connect vaults, store/fetch secrets, manage members, sign & trust, and git-sync —
+mapping plain requests ("get the prod DB password into my .env") to the right commands. It's
+the canonical, version-controlled copy; to use it yourself, copy it into `~/.claude/skills/`.
+
 ## License
 
 MIT © Bobrov Aleksandr

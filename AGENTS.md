@@ -61,4 +61,7 @@ area to work on. Based on the answer, read the relevant `docs/` file before acti
   committed (the `--locked` gates need it).
 - **`Formula/sshare.rb` is generated** by `release.yml` — edit the workflow heredoc, not
   the formula. Don't hand-edit GitHub Releases.
+- **Keep the usage skill in sync.** The canonical Claude Code skill lives at
+  [`.claude/skills/sshare/SKILL.md`](.claude/skills/sshare/SKILL.md); when CLI commands or
+  flags change, update it in the **same** PR (it documents the *released* surface).
 - **Don't commit/push unless asked.** Branch off `main` for non-trivial work.
