@@ -32,8 +32,8 @@ one-line justification comment.
 - **No filesystem path built from user input without `validate_name`/`validate_component`.**
 - **No `age` types outside `crypto.rs`** (the single allowed exception is the
   `age::ssh::Recipient` return type in `vault.rs`), and **no `ssh-key` types outside
-  `sign.rs`**. Each crypto library stays isolated to one module. See
-  [ARCHITECTURE.md](ARCHITECTURE.md).
+  `sign.rs`**. Each crypto library stays isolated to one module. Likewise, **shelling out to
+  `git` happens only in `git.rs`**. See [ARCHITECTURE.md](ARCHITECTURE.md).
 - No `println!`-as-logging for diagnostics; `stdout` is reserved for command output (and
   for `get`, raw secret bytes). Diagnostics go to `stderr`.
 

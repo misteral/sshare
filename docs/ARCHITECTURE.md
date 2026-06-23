@@ -22,6 +22,7 @@ modules (`crypto.rs` = `age`, `sign.rs` = `ssh-key`) and two config-dir stores (
 | `src/sign.rs` | SSHSIG `sign`/`verify`/`fingerprint_of` over the member set — the only place `ssh-key` types live | no (`ssh-key`, exclusively) |
 | `src/registry.rs` | `Registry` of *connected* vaults (name → local path) in the user's config dir; `connect`/`disconnect`/`list`/`path_of` | no |
 | `src/trust.rs` | `TrustStore` — TOFU pin store (vault id → authority fingerprint) in the config dir | no |
+| `src/git.rs` | thin wrapper over the system `git` — autocommit-on-change + the `sshare git` passthrough; the only module that shells out to git | no |
 | `src/test_keys.rs` | throwaway ed25519 keypairs, `#[cfg(test)]` only — never compiled into the binary | no |
 
 `age` lives only in `crypto.rs` and `ssh-key` lives only in `sign.rs` — the two crypto
@@ -55,10 +56,13 @@ parent directories looking for `.sshare/config.toml`.
 <root>/secrets/<name>.age         # age ciphertext; nestable, e.g. secrets/prod/api-token.age
 ```
 
-The repo itself is the transport: users `git commit` + `git push`/`pull`. **The CLI does
-no git operations and no network I/O** — see [SECURITY.md](SECURITY.md) and the note in
-[design-docs/index.md](design-docs/index.md). This holds even for `connect`, which only
-*registers* an already-cloned local repo (see below).
+The repo is the transport. **The CLI makes no network calls by default** and
+**auto-commits locally** when the vault is a git repo (`git.rs`); network (push/pull/fetch)
+happens only via an explicit `sshare git …`. git is shelled out to, never embedded, and
+reads (`get`/`ls`/`vaults`) never commit or use the network. `connect` likewise only
+*registers* an already-present local repo. See
+[design-docs/git-integration.md](design-docs/git-integration.md) and
+[SECURITY.md](SECURITY.md).
 
 ## Vault resolution & the connected-vault registry
 

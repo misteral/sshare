@@ -5,6 +5,7 @@
 //! secret, so access control is exactly "who holds a recipient key".
 
 mod crypto;
+mod git;
 mod registry;
 mod sign;
 #[cfg(test)]
@@ -58,6 +59,12 @@ enum Command {
     Trust {
         #[command(subcommand)]
         action: Option<TrustCommand>,
+    },
+    /// Run git inside the vault (passthrough): `sshare git push`, `git pull`, `git log`, …
+    Git {
+        /// Arguments passed straight to `git`, run inside the vault.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
     },
     /// Manage members (people identified by an SSH public key).
     #[command(subcommand)]
@@ -134,6 +141,7 @@ fn main() -> Result<()> {
         Command::Disconnect { name } => cmd_disconnect(&name),
         Command::Vaults => cmd_vaults(),
         Command::Trust { action } => cmd_trust(sel, action),
+        Command::Git { args } => cmd_git(sel, &args),
         Command::Member(MemberCommand::Add {
             name,
             key,
@@ -154,6 +162,7 @@ fn cmd_init() -> Result<()> {
     let vault = Vault::init(&std::env::current_dir()?)?;
     let name = default_vault_name(vault.root());
     Registry::load()?.connect(&name, vault.root())?;
+    maybe_autocommit(&vault, "sshare: initialize vault");
     println!(
         "Initialized empty sshare vault in {}",
         vault.root().display()
@@ -298,6 +307,31 @@ fn verify_members_trusted(vault: &Vault) -> Result<()> {
     }
 }
 
+fn cmd_git(selector: Option<&str>, args: &[String]) -> Result<()> {
+    let vault = resolve_vault(selector)?;
+    let code = git::passthrough(vault.root(), args)?;
+    if code != 0 {
+        std::process::exit(code);
+    }
+    Ok(())
+}
+
+/// Returns true if autocommit is disabled via `SSHARE_NO_AUTOCOMMIT`.
+fn autocommit_disabled() -> bool {
+    std::env::var("SSHARE_NO_AUTOCOMMIT").is_ok_and(|v| !v.is_empty() && v != "0")
+}
+
+/// Commits the vault change if it's a git repo and autocommit isn't disabled. Warns instead
+/// of failing — the mutation already succeeded on disk, so a commit hiccup must not lose it.
+fn maybe_autocommit(vault: &Vault, message: &str) {
+    if autocommit_disabled() || !git::is_repo(vault.root()) {
+        return;
+    }
+    if let Err(e) = git::autocommit(vault.root(), message) {
+        eprintln!("warning: change saved but not committed ({e}). Commit it manually.");
+    }
+}
+
 /// Resolves which vault a command should act on.
 ///
 /// Order: `--vault`/`$SSHARE_VAULT` name → the vault in the current directory → the only
@@ -383,6 +417,7 @@ fn cmd_member_add(
     };
     vault.add_member(name, pubkey.trim())?;
     sign_and_pin_members(&vault, identity)?;
+    maybe_autocommit(&vault, &format!("sshare: add member {name}"));
     println!("Added member '{name}' and re-signed the member list.");
     println!("Run 'sshare rekey' to grant them access to existing secrets.");
     Ok(())
@@ -407,6 +442,7 @@ fn cmd_member_rm(selector: Option<&str>, name: &str, identity: Option<&Path>) ->
     let vault = resolve_vault(selector)?;
     vault.remove_member(name)?;
     sign_and_pin_members(&vault, identity)?;
+    maybe_autocommit(&vault, &format!("sshare: remove member {name}"));
     println!("Removed member '{name}' and re-signed the member list.");
     println!("Run 'sshare rekey' so existing secrets are no longer encrypted to them.");
     println!("Then rotate any secrets they could read — they may already have copies.");
@@ -421,6 +457,7 @@ fn cmd_add(
 ) -> Result<()> {
     let vault = resolve_vault(selector)?;
     verify_members_trusted(&vault)?;
+    let existed = vault.has_secret(name);
     let recipients = vault.recipients()?;
     if recipients.is_empty() {
         bail!("no members yet — add at least one with 'sshare member add' before storing secrets");
@@ -435,6 +472,8 @@ fn cmd_add(
     };
     let blob = crypto::encrypt(&plaintext, &recipients)?;
     vault.write_secret(name, &blob)?;
+    let verb = if existed { "update" } else { "add" };
+    maybe_autocommit(&vault, &format!("sshare: {verb} secret {name}"));
     println!(
         "Stored '{name}', encrypted for {} member(s).",
         recipients.len()
@@ -479,6 +518,14 @@ fn cmd_rekey(selector: Option<&str>, identity: Option<PathBuf>) -> Result<()> {
         let reencrypted = crypto::encrypt(&plaintext, &recipients)?;
         vault.write_secret(name, &reencrypted)?;
     }
+    maybe_autocommit(
+        &vault,
+        &format!(
+            "sshare: rekey {} secret(s) for {} member(s)",
+            names.len(),
+            recipients.len()
+        ),
+    );
     println!(
         "Re-encrypted {} secret(s) for {} member(s).",
         names.len(),

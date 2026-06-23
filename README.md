@@ -31,9 +31,9 @@ secrets/
 - If your key is not a recipient, decryption fails — that *is* the access control.
 - The **member list is signed** by a maintainer and verified before encrypting, so a
   committer can't silently add themselves as a recipient (see *Tamper-evidence* below).
-- **Commit and `git push`** after changes; teammates `git pull` to sync. sshare runs no git
-  itself, but it remembers vaults you *connect* so you can use them by name from anywhere
-  (see *Connected vaults*).
+- **sshare auto-commits** each change when the vault is a git repo; publish with
+  `sshare git push` (and `sshare git pull` to sync). It also remembers vaults you *connect*
+  so you can use them by name from anywhere (see *Connected vaults* and *Git integration*).
 
 ## Install
 
@@ -101,6 +101,7 @@ export DB_PASSWORD="$(sshare get db-prod)"
 | `sshare vaults` | List connected vaults. |
 | `sshare trust` | Show the vault's signing authority and pin status. |
 | `sshare trust accept [<fingerprint>]` | Pin (first use) or re-pin the trusted signing authority. |
+| `sshare git <args…>` | Run git inside the vault: `sshare git push`, `git pull`, `git log`, … |
 | `sshare member add <name> [--key <path\|->] [--identity <path>]` | Register a member's SSH public key and re-sign the member list. |
 | `sshare member ls` | List members. |
 | `sshare member rm <name> [--identity <path>]` | Remove a member and re-sign (then run `rekey`). |
@@ -146,6 +147,25 @@ sshare trust accept                          # pin it (verify the fingerprint ou
 If the member list is changed without a valid signature by the pinned authority, `add` and
 `rekey` refuse with an error. See
 [docs/design-docs/signed-members-list.md](docs/design-docs/signed-members-list.md).
+
+## Git integration
+
+When the vault is a git repository, sshare **auto-commits** every change (`add`,
+`member add/rm`, `rekey`) with a descriptive message — so you never forget. This is **local
+only**; the network is touched solely when you ask:
+
+```sh
+sshare git push               # publish (and `sshare git pull` to fetch teammates' changes)
+sshare git log --oneline      # any git command, run inside the vault
+sshare --vault team git pull  # target a connected vault from anywhere
+```
+
+- Reads (`get` / `ls` / `vaults`) never commit or hit the network — safe in scripts.
+- It shells out to your `git` (auth, remotes, hooks all yours); no git library is embedded.
+- Disable autocommit for a one-shot batch with `SSHARE_NO_AUTOCOMMIT=1` (e.g. add many
+  secrets, then commit once yourself).
+
+See [docs/design-docs/git-integration.md](docs/design-docs/git-integration.md).
 
 ## Security notes
 

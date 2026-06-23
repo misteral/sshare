@@ -264,6 +264,11 @@ impl Vault {
         fs::read(&path).with_context(|| format!("cannot read {}", path.display()))
     }
 
+    /// Returns true if a secret named `name` already exists.
+    pub(crate) fn has_secret(&self, name: &str) -> bool {
+        validate_name(name).is_ok() && self.secret_path(name).exists()
+    }
+
     /// Returns the `.sshare/` metadata directory.
     fn sshare_dir(&self) -> PathBuf {
         self.root.join(VAULT_DIR)

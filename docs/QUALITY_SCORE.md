@@ -13,6 +13,7 @@ _Last reviewed: 2026-06-23 (post v0.2.0)._
 | `src/registry.rs` | A | Connected-vault registry; `connect`/`disconnect`/lookup/idempotency/invalid-name/missing-file all unit-tested (via `load_from(tempdir)`), plus the e2e `connect`→`--vault`→`disconnect` path. |
 | `src/sign.rs` | A | SSHSIG over the member set; sole `ssh-key` importer. Unit-tested: sign/verify round-trip, fingerprint match, tamper → fail, garbage → fail. |
 | `src/trust.rs` | A | TOFU pin store; pin/lookup/re-pin/missing-file unit-tested, plus the e2e tamper-rejection and second-machine `trust accept` paths. |
+| `src/git.rs` | A | System-`git` wrapper (autocommit + passthrough); sole git shell-out. Unit-tested (repo detect, scoped commit, no-op-when-clean) + e2e (autocommit, `git log` passthrough, `SSHARE_NO_AUTOCOMMIT`). |
 | `src/test_keys.rs` | n/a | Test-only fixtures (`#[cfg(test)]`). |
 | `.github/workflows/*` | B | CI + release work and are exercised (shipped through v0.2.0). Gaps: actions pinned by major tag not SHA; Node 20 deprecation warnings; no build-provenance/signing. |
 

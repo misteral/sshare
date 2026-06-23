@@ -8,3 +8,5 @@ append an outcome note (what shipped, what changed vs the plan).
   `vaults` + `--vault` (shipped in v0.1.3).
 - [signed-members.md](signed-members.md) — tamper-evident member list: SSHSIG signing +
   TOFU pinning + verify-before-encrypt (ships in v0.2.0).
+- [git-integration.md](git-integration.md) — autocommit on change + `sshare git` passthrough
+  (ships in v0.3.0).

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Git integration.** When the vault is a git repository, `add` / `member add` / `member rm`
+  / `rekey` now **auto-commit** the change locally with a descriptive message (e.g.
+  `sshare: add secret db-prod`), so you can't forget. New `sshare git <args…>` runs git
+  inside the vault (`sshare git push` / `pull` / `log`, and composes with `--vault`). Network
+  happens only on an explicit `sshare git push`/etc.; reads (`get`/`ls`/`vaults`) stay
+  git-free. Disable autocommit for a one-shot batch with `SSHARE_NO_AUTOCOMMIT=1`.
+
 ## [0.2.0] - 2026-06-23
 
 ### Added
