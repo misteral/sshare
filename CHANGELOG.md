@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `sshare rm <name>` — remove a stored secret (auto-commits like other mutations). Previously
+  you had to delete the `.age` file via `sshare git rm`.
+
 ## [0.3.0] - 2026-06-23
 
 ### Added

@@ -108,6 +108,7 @@ export DB_PASSWORD="$(sshare get db-prod)"
 | `sshare add <name> [--file <path>\|--value <v>]` | Store/update a secret (stdin by default). |
 | `sshare get <name> [--identity <path>]` | Decrypt a secret to stdout. |
 | `sshare ls` | List stored secrets. |
+| `sshare rm <name>` | Remove a stored secret. |
 | `sshare rekey [--identity <path>]` | Re-encrypt all secrets for the current members. |
 
 Any command that operates on a vault also accepts a global **`--vault <name>`** (or the
@@ -150,7 +151,7 @@ If the member list is changed without a valid signature by the pinned authority,
 
 ## Git integration
 
-When the vault is a git repository, sshare **auto-commits** every change (`add`,
+When the vault is a git repository, sshare **auto-commits** every change (`add`, `rm`,
 `member add/rm`, `rekey`) with a descriptive message — so you never forget. This is **local
 only**; the network is touched solely when you ask:
 

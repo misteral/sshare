@@ -90,6 +90,11 @@ enum Command {
     },
     /// List stored secrets.
     Ls,
+    /// Remove a stored secret.
+    Rm {
+        /// Secret name to remove.
+        name: String,
+    },
     /// Re-encrypt every secret for the current member set.
     Rekey {
         /// SSH private key to decrypt existing secrets with.
@@ -154,6 +159,7 @@ fn main() -> Result<()> {
         Command::Add { name, file, value } => cmd_add(sel, &name, file.as_deref(), value),
         Command::Get { name, identity } => cmd_get(sel, &name, identity),
         Command::Ls => cmd_ls(sel),
+        Command::Rm { name } => cmd_rm(sel, &name),
         Command::Rekey { identity } => cmd_rekey(sel, identity),
     }
 }
@@ -499,6 +505,14 @@ fn cmd_ls(selector: Option<&str>) -> Result<()> {
     for name in names {
         println!("{name}");
     }
+    Ok(())
+}
+
+fn cmd_rm(selector: Option<&str>, name: &str) -> Result<()> {
+    let vault = resolve_vault(selector)?;
+    vault.remove_secret(name)?;
+    maybe_autocommit(&vault, &format!("sshare: remove secret {name}"));
+    println!("Removed secret '{name}'.");
     Ok(())
 }
 
