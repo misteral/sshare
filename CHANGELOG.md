@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-06-23
+
 ### Added
 
 - `sshare rm <name>` — remove a stored secret (auto-commits like other mutations). Previously
@@ -91,7 +93,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `sshare rekey` — re-encrypt every secret for the current member set.
 - Path-traversal-safe, nestable secret names (e.g. `prod/api-token`).
 
-[Unreleased]: https://github.com/misteral/sshare/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/misteral/sshare/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/misteral/sshare/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/misteral/sshare/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/misteral/sshare/compare/v0.1.3...v0.2.0
 [0.1.3]: https://github.com/misteral/sshare/compare/v0.1.2...v0.1.3
