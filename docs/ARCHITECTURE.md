@@ -84,6 +84,8 @@ unregisters and never deletes files.
 - **`add`**: read plaintext (stdin / `--file` / `--value`) → `vault.recipients()` (all
   members) → `crypto::encrypt` to every recipient → `vault.write_secret`. v0.1 encrypts
   every secret to **all** members; there is no per-secret granularity yet.
+- **`rm`**: `vault.remove_secret` deletes the `.age` file, then autocommit. No crypto; not
+  gated on trust (it removes, doesn't encrypt).
 - **`get`**: `vault.read_secret` → resolve identity (`--identity` or first of
   `~/.ssh/{id_ed25519,id_rsa}`) → `crypto::decrypt` → raw bytes to stdout. A non-recipient
   key simply fails to decrypt — that failure is the access boundary.

@@ -113,6 +113,24 @@ fn signed_happy_path_store_and_retrieve() {
 }
 
 #[test]
+fn remove_secret() {
+    let f = Fixture::setup();
+    assert!(add_secret(&f.root, &f.cfg, "tmp", b"x").status.success());
+    assert!(run_ok(&f.root, &f.cfg, &["ls"]).contains("tmp"));
+
+    run_ok(&f.root, &f.cfg, &["rm", "tmp"]);
+    assert!(!run_ok(&f.root, &f.cfg, &["ls"]).contains("tmp"));
+
+    // Removing a missing secret errors clearly.
+    let out = sshare(&f.root, &f.cfg)
+        .args(["rm", "nope"])
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("no such secret"));
+}
+
+#[test]
 fn get_with_pubkey_path_fails_with_actionable_message() {
     let f = Fixture::setup();
     assert!(add_secret(&f.root, &f.cfg, "s1", b"x").status.success());

@@ -81,6 +81,7 @@ target a connected vault from anywhere.
 | `sshare add <name> [--file <path>] [--value <v>]` | Store/update a secret. Default reads **stdin**. Name may nest: `prod/api-token`. |
 | `sshare get <name> [--identity <path>]` | Decrypt a secret to **stdout** (raw bytes, no added newline). |
 | `sshare ls` | List stored secret names. |
+| `sshare rm <name>` | Remove a stored secret (auto-commits). |
 | `sshare rekey [--identity <path>]` | Re-encrypt every secret for the current member set. Run after add/rm member. |
 | `sshare git <args…>` | Run git inside the vault: `sshare git push`, `git pull`, `git log`. The only command that touches the network. |
 
@@ -123,6 +124,12 @@ sshare add github/ci-token --file ./token.txt
 # Or via stdin:
 printf '%s' '<the-token>' | sshare add github/ci-token
 sshare git push        # the add auto-committed locally; this publishes it
+```
+
+**"Delete secret X"** (e.g. "удали секрет db-prod"):
+```sh
+sshare rm db-prod
+sshare git push        # the rm auto-committed locally; this publishes it
 ```
 
 **"Store this existing `.env` as a secret"**:

@@ -39,7 +39,8 @@ We adopt the same model.
 
 ## Autocommit
 
-- **When:** after `init`, `member add`, `member rm`, `add`, `rekey` complete successfully.
+- **When:** after `init`, `member add`, `member rm`, `add`, `rm`, `rekey` complete
+  successfully.
 - **Repo check:** `git -C <root> rev-parse --is-inside-work-tree`. If the vault is **not** a
   git repo, silently skip (a local-only vault still works — autocommit is a convenience, not
   a requirement).
@@ -69,6 +70,7 @@ For `member add`/`rm`, autocommit runs **after** the re-sign, so the member file
 | `member rm <name>` | `sshare: remove member <name>` |
 | `add <name>` (new) | `sshare: add secret <name>` |
 | `add <name>` (existing) | `sshare: update secret <name>` |
+| `rm <name>` | `sshare: remove secret <name>` |
 | `rekey` | `sshare: rekey <N> secret(s) for <M> member(s)` |
 
 Deterministic, templated per command (add-vs-update is decided by whether the `.age` file

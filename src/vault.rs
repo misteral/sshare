@@ -264,6 +264,21 @@ impl Vault {
         fs::read(&path).with_context(|| format!("cannot read {}", path.display()))
     }
 
+    /// Removes the secret named `name`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `name` is invalid or the secret does not exist.
+    pub(crate) fn remove_secret(&self, name: &str) -> Result<()> {
+        validate_name(name)?;
+        let path = self.secret_path(name);
+        if !path.exists() {
+            bail!("no such secret '{name}'");
+        }
+        fs::remove_file(&path).with_context(|| format!("cannot remove {}", path.display()))?;
+        Ok(())
+    }
+
     /// Returns true if a secret named `name` already exists.
     pub(crate) fn has_secret(&self, name: &str) -> bool {
         validate_name(name).is_ok() && self.secret_path(name).exists()
@@ -456,6 +471,17 @@ mod tests {
         );
         assert_eq!(vault.read_secret("prod/api-token").unwrap(), b"b");
         assert!(vault.read_secret("missing").is_err());
+    }
+
+    #[test]
+    fn remove_secret_deletes_and_errors_on_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = Vault::init(dir.path()).unwrap();
+        vault.write_secret("tmp", b"x").unwrap();
+        assert!(vault.has_secret("tmp"));
+        vault.remove_secret("tmp").unwrap();
+        assert!(!vault.has_secret("tmp"));
+        assert!(vault.remove_secret("tmp").is_err());
     }
 
     #[test]
