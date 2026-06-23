@@ -78,7 +78,7 @@ target a connected vault from anywhere.
 | `sshare member add <name> [--key <path\|->] [--identity <path>]` | Register a member's SSH **public** key and re-sign the member list (only the maintainer may). |
 | `sshare member ls` | List members. |
 | `sshare member rm <name> [--identity <path>]` | Remove a member and re-sign (then `rekey`, then rotate). |
-| `sshare add <name> [--file <path>] [--value <v>]` | Store/update a secret. Default reads **stdin**. Name may nest: `prod/api-token`. |
+| `sshare add <name> [--file <path>] [--value <v>]` | Store/update a secret. **Prompts (hidden) when interactive**; else reads stdin / `--file` / `--value`. Name may nest: `prod/api-token`. |
 | `sshare get <name> [--identity <path>]` | Decrypt a secret to **stdout** (raw bytes, no added newline). |
 | `sshare ls` | List stored secret names. |
 | `sshare rm <name>` | Remove a stored secret (auto-commits). |
@@ -90,8 +90,9 @@ target a connected vault from anywhere.
 1. **Never echo a secret value back to the user or into the chat.** When retrieving,
    write it straight to its destination (file / env) and confirm *by name only*
    ("wrote `db-prod` to `.env`").
-2. **Keep secrets out of shell history and the process list.** Prefer `--file` or stdin;
-   **avoid `--value`** (visible in history and `ps`). When you must pass an inline value,
+2. **Keep secrets out of shell history and the process list.** Easiest at a terminal: run
+   `sshare add <name>` and type the value at the **hidden prompt**. Otherwise use `--file`
+   or stdin; **avoid `--value`** (visible in history and `ps`). Non-interactive value →
    pipe via stdin: `printf %s "$secret" | sshare add <name>`.
 3. **Publish & fetch via sshare.** Changes **auto-commit locally** — no manual
    `git add/commit` needed. Run **`sshare git push`** to publish after changes, and
@@ -119,9 +120,11 @@ To export into the current shell instead: `export DB_PASSWORD="$(sshare get db-p
 
 **"Save/fix this token as a team secret"** (e.g. "зафиксируй токен в секретик команды"):
 ```sh
-# Preferred — from a file, keeps it out of shell history:
+# Simplest at a terminal — type/paste the value at the hidden prompt:
+sshare add github/ci-token
+# Or from a file (keeps it out of shell history):
 sshare add github/ci-token --file ./token.txt
-# Or via stdin:
+# Or via stdin (for scripts):
 printf '%s' '<the-token>' | sshare add github/ci-token
 sshare git push        # the add auto-committed locally; this publishes it
 ```

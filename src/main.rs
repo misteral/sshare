@@ -13,7 +13,7 @@ mod test_keys;
 mod trust;
 mod vault;
 
-use std::io::{Read, Write};
+use std::io::{IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -473,7 +473,7 @@ fn cmd_add(
             std::fs::read(path).with_context(|| format!("cannot read {}", path.display()))?
         }
         (None, Some(inline)) => inline.into_bytes(),
-        (None, None) => read_stdin_bytes()?,
+        (None, None) => read_secret_value(name)?,
         (Some(_), Some(_)) => unreachable!("clap marks --file and --value as conflicting"),
     };
     let blob = crypto::encrypt(&plaintext, &recipients)?;
@@ -567,6 +567,18 @@ fn read_stdin_bytes() -> Result<Vec<u8>> {
         .read_to_end(&mut buf)
         .context("failed to read stdin")?;
     Ok(buf)
+}
+
+/// Reads a secret value to store: a hidden single-line prompt when stdin is a terminal,
+/// otherwise the raw stdin stream (so pipes and scripts work unchanged).
+fn read_secret_value(name: &str) -> Result<Vec<u8>> {
+    if std::io::stdin().is_terminal() {
+        let value = rpassword::prompt_password(format!("Value for {name}: "))
+            .context("failed to read value")?;
+        Ok(value.into_bytes())
+    } else {
+        read_stdin_bytes()
+    }
 }
 
 fn read_stdin_string() -> Result<String> {

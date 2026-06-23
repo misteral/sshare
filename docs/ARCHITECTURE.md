@@ -81,9 +81,10 @@ unregisters and never deletes files.
 
 ## Key data flows
 
-- **`add`**: read plaintext (stdin / `--file` / `--value`) → `vault.recipients()` (all
-  members) → `crypto::encrypt` to every recipient → `vault.write_secret`. v0.1 encrypts
-  every secret to **all** members; there is no per-secret granularity yet.
+- **`add`**: read plaintext — a hidden single-line prompt (`rpassword`) when stdin is a
+  terminal, else `--file` / `--value` / piped stdin → `vault.recipients()` (all members) →
+  `crypto::encrypt` to every recipient → `vault.write_secret`. Encrypts every secret to
+  **all** members; there is no per-secret granularity yet.
 - **`rm`**: `vault.remove_secret` deletes the `.age` file, then autocommit. No crypto; not
   gated on trust (it removes, doesn't encrypt).
 - **`get`**: `vault.read_secret` → resolve identity (`--identity` or first of

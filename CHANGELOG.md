@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `sshare add <name>` now prompts for the value with **hidden input** when run interactively
+  (stdin is a terminal) — no more typing a secret in the clear. Piping
+  (`… | sshare add x`), `--file`, and `--value` are unchanged, so scripts and agents behave
+  exactly as before.
+
 ## [0.4.0] - 2026-06-23
 
 ### Added
