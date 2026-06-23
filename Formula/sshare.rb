@@ -2,28 +2,28 @@
 class Sshare < Formula
   desc "Share team secrets with SSH keys: encrypt to public keys, decrypt with your private key"
   homepage "https://github.com/misteral/sshare"
-  version "0.1.3"
+  version "0.2.0"
   license "MIT"
 
   on_macos do
     on_arm do
-      url "https://github.com/misteral/sshare/releases/download/v0.1.3/sshare-0.1.3-aarch64-apple-darwin.tar.gz"
-      sha256 "0c8a987fbad0976d6a2c6050c536d752fe4d7d90dffe70adc79bb43975d895ba"
+      url "https://github.com/misteral/sshare/releases/download/v0.2.0/sshare-0.2.0-aarch64-apple-darwin.tar.gz"
+      sha256 "8c0744f6cce2fa5fbe61fa824a6a5710e951c26292e632cb342de84e62c5d8ef"
     end
     on_intel do
-      url "https://github.com/misteral/sshare/releases/download/v0.1.3/sshare-0.1.3-x86_64-apple-darwin.tar.gz"
-      sha256 "92f4e8f60d3009374415f36370baf6c5f94cc36c55fdaa44a5bb216e2c35dbf1"
+      url "https://github.com/misteral/sshare/releases/download/v0.2.0/sshare-0.2.0-x86_64-apple-darwin.tar.gz"
+      sha256 "e8b1252b9bc8a740887143a6f01cef504dc6f6260eadf7d524a07aaa0c2e0eae"
     end
   end
 
   on_linux do
     on_arm do
-      url "https://github.com/misteral/sshare/releases/download/v0.1.3/sshare-0.1.3-aarch64-unknown-linux-gnu.tar.gz"
-      sha256 "8ecec848daf28fe526176965c8f9ffc7ee29c4a7194ba3eb20b59f66694f1686"
+      url "https://github.com/misteral/sshare/releases/download/v0.2.0/sshare-0.2.0-aarch64-unknown-linux-gnu.tar.gz"
+      sha256 "08f0a6abcf1fa718caab587a0d3a1ef12c95f81b29e780a22d41ce656864f6e9"
     end
     on_intel do
-      url "https://github.com/misteral/sshare/releases/download/v0.1.3/sshare-0.1.3-x86_64-unknown-linux-gnu.tar.gz"
-      sha256 "55452f120b9085a3225d8da624cb1da46dbcd187e44de745dcacbdfbe521469b"
+      url "https://github.com/misteral/sshare/releases/download/v0.2.0/sshare-0.2.0-x86_64-unknown-linux-gnu.tar.gz"
+      sha256 "50c008d981ce3790ab3bd454aba289c0055a08a9d0c1cd0378946c7ada331d68"
     end
   end
 
