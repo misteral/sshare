@@ -19,7 +19,9 @@ See [`PRD.md`](./PRD.md) for the full product spec.
 ```
 .sshare/
   config.toml          # marks the vault root
+  id                   # stable vault id (used for trust pinning)
   members/alice.pub    # one SSH public key per member
+  members.sig          # maintainer's signature over the member set (tamper-evidence)
 secrets/
   db-prod.age          # age-encrypted secret blobs
 ```
@@ -27,7 +29,11 @@ secrets/
 - `sshare add` encrypts a secret to **every** member's SSH public key.
 - `sshare get` decrypts it with your SSH private key (`~/.ssh/id_ed25519` or `id_rsa`).
 - If your key is not a recipient, decryption fails — that *is* the access control.
-- Commit the repo and `git push`; teammates `git pull` to sync.
+- The **member list is signed** by a maintainer and verified before encrypting, so a
+  committer can't silently add themselves as a recipient (see *Tamper-evidence* below).
+- **Commit and `git push`** after changes; teammates `git pull` to sync. sshare runs no git
+  itself, but it remembers vaults you *connect* so you can use them by name from anywhere
+  (see *Connected vaults*).
 
 ## Install
 
@@ -156,17 +162,23 @@ If the member list is changed without a valid signature by the pinned authority,
 
 ## Status
 
-v0.1 — core flow (init / members / add / get / ls / rekey). Every secret is encrypted
-to **all** members. Planned next (see PRD open questions): per-secret recipients and
-groups (`grant`/`revoke`), and a signed members list to prevent tampering.
+v0.2 — core flow (init / members / add / get / ls / rekey), **connected vaults**
+(`connect` / `vaults` / global `--vault`), and a **signed, tamper-evident member list**
+(TOFU — `trust` / `trust accept`). Every secret is still encrypted to **all** members.
+Planned next (see [`PRD.md`](./PRD.md) and
+[the tech-debt tracker](docs/exec-plans/tech-debt-tracker.md)): per-secret recipients and
+groups (`grant`/`revoke`), multi-maintainer signing, and supply-chain hardening (release
+provenance + signed tags).
 
 ## Development
 
 ```sh
-cargo test            # unit tests (round-trip, wrong-key rejection, vault flow)
-cargo clippy --all-targets
-cargo fmt
+cargo test --locked                                  # unit + integration tests
+cargo clippy --all-targets --locked -- -D warnings   # pedantic lints are a CI gate
+cargo fmt --all -- --check                           # formatting is a CI gate
 ```
+
+Contributor and agent docs live in [`AGENTS.md`](./AGENTS.md) and [`docs/`](./docs).
 
 ## License
 
