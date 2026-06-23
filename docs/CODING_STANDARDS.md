@@ -4,10 +4,10 @@
 
 - **Rust edition 2024** (requires Rust ≥ 1.85; developed on 1.96). CI uses
   `dtolnay/rust-toolchain@stable`.
-- The dependency set is intentionally small and pure-Rust: `age` (ssh feature), `anyhow`,
-  `clap` (derive), `rpassword`, plus `tempfile` for tests. **Adding a dependency is a
-  reviewable decision** — especially anything pulling in C/`openssl` (breaks the
-  single-static-binary, linker-only cross-compile property).
+- The dependency set is intentionally small and pure-Rust: `age` (ssh feature), `ssh-key`
+  (SSHSIG signing), `getrandom`, `anyhow`, `clap` (derive), `rpassword`, plus `tempfile` for
+  tests. **Adding a dependency is a reviewable decision** — especially anything pulling in
+  C/`openssl` (breaks the single-static-binary, linker-only cross-compile property).
 
 ## Lints are gates, not suggestions
 
@@ -31,7 +31,9 @@ one-line justification comment.
 - **No secret plaintext in logs or errors** (see [SECURITY.md](SECURITY.md)).
 - **No filesystem path built from user input without `validate_name`/`validate_component`.**
 - **No `age` types outside `crypto.rs`** (the single allowed exception is the
-  `age::ssh::Recipient` return type in `vault.rs`). See [ARCHITECTURE.md](ARCHITECTURE.md).
+  `age::ssh::Recipient` return type in `vault.rs`), and **no `ssh-key` types outside
+  `sign.rs`**. Each crypto library stays isolated to one module. See
+  [ARCHITECTURE.md](ARCHITECTURE.md).
 - No `println!`-as-logging for diagnostics; `stdout` is reserved for command output (and
   for `get`, raw secret bytes). Diagnostics go to `stderr`.
 

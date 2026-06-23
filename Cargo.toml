@@ -10,7 +10,9 @@ repository = "https://github.com/misteral/sshare"
 age = { version = "0.11.3", features = ["ssh"] }
 anyhow = "1.0.102"
 clap = { version = "4.6.1", features = ["derive"] }
+getrandom = "0.2"
 rpassword = "7.5.4"
+ssh-key = { version = "0.6", features = ["ed25519", "rsa", "encryption"] }
 
 [dev-dependencies]
 tempfile = "3"
