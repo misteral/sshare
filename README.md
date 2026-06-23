@@ -70,7 +70,9 @@ sshare init
 sshare member add alice --key ~/.ssh/id_ed25519.pub
 sshare member add bob   --key ./bob_ed25519.pub
 
-# 3. store a secret (read from stdin — keeps it out of shell history)
+# 3. store a secret — run it and type the value at a hidden prompt:
+sshare add db-prod
+#    …or pipe it (keeps it out of shell history), for scripts:
 printf 'super-secret-password' | sshare add db-prod
 
 # 4. read it back
@@ -105,7 +107,7 @@ export DB_PASSWORD="$(sshare get db-prod)"
 | `sshare member add <name> [--key <path\|->] [--identity <path>]` | Register a member's SSH public key and re-sign the member list. |
 | `sshare member ls` | List members. |
 | `sshare member rm <name> [--identity <path>]` | Remove a member and re-sign (then run `rekey`). |
-| `sshare add <name> [--file <path>\|--value <v>]` | Store/update a secret (stdin by default). |
+| `sshare add <name> [--file <path>\|--value <v>]` | Store/update a secret. Prompts (hidden) when interactive; otherwise reads stdin / `--file` / `--value`. |
 | `sshare get <name> [--identity <path>]` | Decrypt a secret to stdout. |
 | `sshare ls` | List stored secrets. |
 | `sshare rm <name>` | Remove a stored secret. |
