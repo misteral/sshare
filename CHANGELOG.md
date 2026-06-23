@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Signed members list (tamper-evidence).** A maintainer signs the member set with their
+  SSH key (SSHSIG); other machines pin that authority on first use (TOFU) and verify it
+  before encrypting, so a repo committer can no longer silently add a recipient key.
+  - `sshare trust` shows a vault's signing authority and pin status; `sshare trust accept
+    [<fingerprint>]` pins (TOFU) or re-pins (rotation).
+  - `sshare member add` / `member rm` re-sign the member list and accept `--identity` (the
+    signing key, default your `~/.ssh` key). Only the pinned maintainer may change membership.
+
+### Changed
+
+- **BREAKING:** `add` / `rekey` now refuse to encrypt unless the member list is signed by
+  this machine's pinned authority. A vault from before this must be re-signed (`sshare
+  member add`) and trusted (`sshare trust accept`). `init` now writes a vault id (`.sshare/id`).
+
+### Notes
+
+- Adds the `ssh-key` (SSHSIG) and `getrandom` crates — both pure-Rust, so the single static
+  binary is preserved. `ssh-key` is isolated to `src/sign.rs` (as `age` is to `crypto.rs`).
+
 ## [0.1.3] - 2026-06-23
 
 ### Added

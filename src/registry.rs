@@ -154,8 +154,8 @@ impl Registry {
 }
 
 /// Resolves the config directory: `$SSHARE_CONFIG_HOME`, else `$XDG_CONFIG_HOME/sshare`,
-/// else `~/.config/sshare`.
-fn config_dir() -> Result<PathBuf> {
+/// else `~/.config/sshare`. Shared with the TOFU trust store (`trust.rs`).
+pub(crate) fn config_dir() -> Result<PathBuf> {
     if let Some(dir) = std::env::var_os("SSHARE_CONFIG_HOME").filter(|s| !s.is_empty()) {
         return Ok(PathBuf::from(dir));
     }

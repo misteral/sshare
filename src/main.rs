@@ -6,8 +6,10 @@
 
 mod crypto;
 mod registry;
+mod sign;
 #[cfg(test)]
 mod test_keys;
+mod trust;
 mod vault;
 
 use std::io::{Read, Write};
@@ -17,6 +19,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use clap::{Parser, Subcommand};
 
 use crate::registry::Registry;
+use crate::trust::TrustStore;
 use crate::vault::Vault;
 
 /// Command-line interface for `sshare`.
@@ -50,6 +53,12 @@ enum Command {
     },
     /// List connected vaults.
     Vaults,
+    /// Show or set the trusted signing authority for a vault (TOFU). With no subcommand,
+    /// shows the current status.
+    Trust {
+        #[command(subcommand)]
+        action: Option<TrustCommand>,
+    },
     /// Manage members (people identified by an SSH public key).
     #[command(subcommand)]
     Member(MemberCommand),
@@ -91,6 +100,9 @@ enum MemberCommand {
         /// Path to an SSH public key, or `-` for stdin (default: your ~/.ssh/*.pub).
         #[arg(long)]
         key: Option<PathBuf>,
+        /// SSH private key to sign the updated member list with (default: your ~/.ssh key).
+        #[arg(long, short)]
+        identity: Option<PathBuf>,
     },
     /// List members.
     Ls,
@@ -98,6 +110,18 @@ enum MemberCommand {
     Rm {
         /// Member name to remove.
         name: String,
+        /// SSH private key to sign the updated member list with (default: your ~/.ssh key).
+        #[arg(long, short)]
+        identity: Option<PathBuf>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum TrustCommand {
+    /// Pin (or re-pin) this machine's trusted signing authority for the vault.
+    Accept {
+        /// Fingerprint to trust (default: the key that signed the current member list).
+        fingerprint: Option<String>,
     },
 }
 
@@ -109,11 +133,16 @@ fn main() -> Result<()> {
         Command::Connect { path, name } => cmd_connect(path.as_deref(), name),
         Command::Disconnect { name } => cmd_disconnect(&name),
         Command::Vaults => cmd_vaults(),
-        Command::Member(MemberCommand::Add { name, key }) => {
-            cmd_member_add(sel, &name, key.as_deref())
-        }
+        Command::Trust { action } => cmd_trust(sel, action),
+        Command::Member(MemberCommand::Add {
+            name,
+            key,
+            identity,
+        }) => cmd_member_add(sel, &name, key.as_deref(), identity.as_deref()),
         Command::Member(MemberCommand::Ls) => cmd_member_ls(sel),
-        Command::Member(MemberCommand::Rm { name }) => cmd_member_rm(sel, &name),
+        Command::Member(MemberCommand::Rm { name, identity }) => {
+            cmd_member_rm(sel, &name, identity.as_deref())
+        }
         Command::Add { name, file, value } => cmd_add(sel, &name, file.as_deref(), value),
         Command::Get { name, identity } => cmd_get(sel, &name, identity),
         Command::Ls => cmd_ls(sel),
@@ -178,6 +207,95 @@ fn cmd_vaults() -> Result<()> {
         println!("{:<20} {status:<8} {}", vault.name, vault.path.display());
     }
     Ok(())
+}
+
+fn cmd_trust(selector: Option<&str>, action: Option<TrustCommand>) -> Result<()> {
+    if let Some(TrustCommand::Accept { fingerprint }) = action {
+        cmd_trust_accept(selector, fingerprint)
+    } else {
+        cmd_trust_show(selector)
+    }
+}
+
+fn cmd_trust_show(selector: Option<&str>) -> Result<()> {
+    let vault = resolve_vault(selector)?;
+    let vault_id = vault.vault_id()?;
+    println!("vault id: {vault_id}");
+    if let Some(sig) = vault.read_members_sig()? {
+        let status = sign::verify(&vault.canonical_members()?, &sig).map_or_else(
+            |e| format!("members signature INVALID: {e}"),
+            |fp| format!("members signed by: {fp}"),
+        );
+        println!("{status}");
+    } else {
+        println!("members are not signed yet");
+    }
+    if let Some(fp) = TrustStore::load()?.pinned(&vault_id) {
+        println!("pinned authority: {fp}");
+    } else {
+        println!("pinned authority: (none — run 'sshare trust accept')");
+    }
+    Ok(())
+}
+
+fn cmd_trust_accept(selector: Option<&str>, fingerprint: Option<String>) -> Result<()> {
+    let vault = resolve_vault(selector)?;
+    let vault_id = vault.vault_id()?;
+    let fingerprint = if let Some(fp) = fingerprint {
+        fp
+    } else {
+        let sig = vault
+            .read_members_sig()?
+            .ok_or_else(|| anyhow!("members are not signed yet — nothing to accept"))?;
+        sign::verify(&vault.canonical_members()?, &sig)
+            .context("the current member-list signature is invalid; refusing to pin it")?
+    };
+    TrustStore::load()?.pin(&vault_id, &fingerprint)?;
+    println!("Pinned signing authority {fingerprint} for this vault.");
+    Ok(())
+}
+
+/// Signs the current member set with `identity` and ensures this machine pins that key as
+/// the vault's authority. The first signer establishes the authority; afterwards only that
+/// key may change membership.
+fn sign_and_pin_members(vault: &Vault, identity: Option<&Path>) -> Result<()> {
+    let identity = resolve_identity(identity.map(Path::to_path_buf))?;
+    let my_fp = sign::fingerprint_of(&identity)?;
+    let vault_id = vault.vault_id()?;
+    let mut trust = TrustStore::load()?;
+    match trust.pinned(&vault_id) {
+        Some(pinned) if pinned != my_fp => bail!(
+            "only this vault's maintainer ({pinned}) can change membership; your key is {my_fp}"
+        ),
+        Some(_) => {}
+        None => trust.pin(&vault_id, &my_fp)?,
+    }
+    let canonical = vault.canonical_members()?;
+    let sig = sign::sign(&canonical, &identity)?;
+    vault.write_members_sig(&sig)
+}
+
+/// Verifies the vault's member set is signed by this machine's pinned authority. Hard-fails
+/// if the list is unsigned, the signature is invalid, or the signer is not the pinned key.
+fn verify_members_trusted(vault: &Vault) -> Result<()> {
+    let sig = vault.read_members_sig()?.ok_or_else(|| {
+        anyhow!(
+            "this vault's member list is not signed — a maintainer must sign it (e.g. 'sshare member add')"
+        )
+    })?;
+    let signer = sign::verify(&vault.canonical_members()?, &sig).context(
+        "the member list signature is invalid — the members file may have been tampered with",
+    )?;
+    let vault_id = vault.vault_id()?;
+    match TrustStore::load()?.pinned(&vault_id) {
+        Some(pinned) if pinned == signer => Ok(()),
+        Some(pinned) => bail!(
+            "the member list is signed by {signer}, but this vault's pinned authority is {pinned} — possible tampering.\nIf the maintainer key legitimately changed: 'sshare trust accept {signer}'."
+        ),
+        None => bail!(
+            "this vault's signing authority ({signer}) is not yet trusted on this machine.\nVerify it out-of-band, then run 'sshare trust accept {signer}'."
+        ),
+    }
 }
 
 /// Resolves which vault a command should act on.
@@ -251,7 +369,12 @@ fn default_vault_name(root: &Path) -> String {
     }
 }
 
-fn cmd_member_add(selector: Option<&str>, name: &str, key: Option<&Path>) -> Result<()> {
+fn cmd_member_add(
+    selector: Option<&str>,
+    name: &str,
+    key: Option<&Path>,
+    identity: Option<&Path>,
+) -> Result<()> {
     let vault = resolve_vault(selector)?;
     let pubkey = match key {
         Some(p) if p == Path::new("-") => read_stdin_string()?,
@@ -259,7 +382,8 @@ fn cmd_member_add(selector: Option<&str>, name: &str, key: Option<&Path>) -> Res
         None => read_pubkey_file(&default_pubkey()?)?,
     };
     vault.add_member(name, pubkey.trim())?;
-    println!("Added member '{name}'.");
+    sign_and_pin_members(&vault, identity)?;
+    println!("Added member '{name}' and re-signed the member list.");
     println!("Run 'sshare rekey' to grant them access to existing secrets.");
     Ok(())
 }
@@ -279,9 +403,11 @@ fn cmd_member_ls(selector: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-fn cmd_member_rm(selector: Option<&str>, name: &str) -> Result<()> {
-    resolve_vault(selector)?.remove_member(name)?;
-    println!("Removed member '{name}'.");
+fn cmd_member_rm(selector: Option<&str>, name: &str, identity: Option<&Path>) -> Result<()> {
+    let vault = resolve_vault(selector)?;
+    vault.remove_member(name)?;
+    sign_and_pin_members(&vault, identity)?;
+    println!("Removed member '{name}' and re-signed the member list.");
     println!("Run 'sshare rekey' so existing secrets are no longer encrypted to them.");
     println!("Then rotate any secrets they could read — they may already have copies.");
     Ok(())
@@ -294,6 +420,7 @@ fn cmd_add(
     value: Option<String>,
 ) -> Result<()> {
     let vault = resolve_vault(selector)?;
+    verify_members_trusted(&vault)?;
     let recipients = vault.recipients()?;
     if recipients.is_empty() {
         bail!("no members yet — add at least one with 'sshare member add' before storing secrets");
@@ -338,6 +465,7 @@ fn cmd_ls(selector: Option<&str>) -> Result<()> {
 
 fn cmd_rekey(selector: Option<&str>, identity: Option<PathBuf>) -> Result<()> {
     let vault = resolve_vault(selector)?;
+    verify_members_trusted(&vault)?;
     let recipients = vault.recipients()?;
     if recipients.is_empty() {
         bail!("no members — add at least one before re-keying");

@@ -13,7 +13,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
 
 use crate::crypto;
 
@@ -21,6 +21,8 @@ const VAULT_DIR: &str = ".sshare";
 const MEMBERS_DIR: &str = "members";
 const SECRETS_DIR: &str = "secrets";
 const CONFIG_FILE: &str = "config.toml";
+const VAULT_ID_FILE: &str = "id";
+const MEMBERS_SIG_FILE: &str = "members.sig";
 const SECRET_EXT: &str = "age";
 const PUBKEY_EXT: &str = "pub";
 
@@ -55,6 +57,7 @@ impl Vault {
             .with_context(|| format!("cannot create {}", vault_dir.display()))?;
         fs::create_dir_all(dir.join(SECRETS_DIR))?;
         fs::write(vault_dir.join(CONFIG_FILE), "# sshare vault\nversion = 1\n")?;
+        fs::write(vault_dir.join(VAULT_ID_FILE), format!("{}\n", random_id()?))?;
         Ok(Self {
             root: dir.to_path_buf(),
         })
@@ -260,6 +263,84 @@ impl Vault {
         }
         fs::read(&path).with_context(|| format!("cannot read {}", path.display()))
     }
+
+    /// Returns the `.sshare/` metadata directory.
+    fn sshare_dir(&self) -> PathBuf {
+        self.root.join(VAULT_DIR)
+    }
+
+    /// Returns the vault's stable id (from `.sshare/id`), creating a random one if absent.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the id file cannot be read or created.
+    pub(crate) fn vault_id(&self) -> Result<String> {
+        let path = self.sshare_dir().join(VAULT_ID_FILE);
+        match fs::read_to_string(&path) {
+            Ok(s) => Ok(s.trim().to_owned()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                let id = random_id()?;
+                fs::write(&path, format!("{id}\n"))
+                    .with_context(|| format!("cannot write {}", path.display()))?;
+                Ok(id)
+            }
+            Err(e) => Err(e).with_context(|| format!("cannot read {}", path.display())),
+        }
+    }
+
+    /// The canonical bytes of the member set that get signed: a versioned header, the vault
+    /// id, then each `name\0pubkey` (members are already sorted by name).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the id or members cannot be read.
+    pub(crate) fn canonical_members(&self) -> Result<Vec<u8>> {
+        let mut out = format!("sshare-members-v1\n{}\n", self.vault_id()?).into_bytes();
+        for member in self.members()? {
+            out.extend_from_slice(member.name.as_bytes());
+            out.push(0);
+            out.extend_from_slice(member.pubkey.as_bytes());
+            out.push(b'\n');
+        }
+        Ok(out)
+    }
+
+    /// Reads the members-list signature (`.sshare/members.sig`), if present.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file exists but cannot be read.
+    pub(crate) fn read_members_sig(&self) -> Result<Option<String>> {
+        let path = self.sshare_dir().join(MEMBERS_SIG_FILE);
+        match fs::read_to_string(&path) {
+            Ok(s) => Ok(Some(s)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e).with_context(|| format!("cannot read {}", path.display())),
+        }
+    }
+
+    /// Writes the members-list signature to `.sshare/members.sig`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be written.
+    pub(crate) fn write_members_sig(&self, armored: &str) -> Result<()> {
+        let path = self.sshare_dir().join(MEMBERS_SIG_FILE);
+        fs::write(&path, armored).with_context(|| format!("cannot write {}", path.display()))
+    }
+}
+
+/// Generates a random 128-bit hex id for a new vault.
+fn random_id() -> Result<String> {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut bytes = [0u8; 16];
+    getrandom::getrandom(&mut bytes).map_err(|e| anyhow!("cannot generate a vault id ({e})"))?;
+    let mut id = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        id.push(HEX[(b >> 4) as usize] as char);
+        id.push(HEX[(b & 0x0f) as usize] as char);
+    }
+    Ok(id)
 }
 
 /// Recursively collects `.age` files under `dir`, naming them relative to `base`.

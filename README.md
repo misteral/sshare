@@ -93,9 +93,11 @@ export DB_PASSWORD="$(sshare get db-prod)"
 | `sshare connect [<path>] [--name <n>]` | Register an existing local vault so you can use it by name from anywhere. |
 | `sshare disconnect <name>` | Unregister a connected vault (does not delete files). |
 | `sshare vaults` | List connected vaults. |
-| `sshare member add <name> [--key <path\|->]` | Register a member's SSH public key. |
+| `sshare trust` | Show the vault's signing authority and pin status. |
+| `sshare trust accept [<fingerprint>]` | Pin (first use) or re-pin the trusted signing authority. |
+| `sshare member add <name> [--key <path\|->] [--identity <path>]` | Register a member's SSH public key and re-sign the member list. |
 | `sshare member ls` | List members. |
-| `sshare member rm <name>` | Remove a member (then run `rekey`). |
+| `sshare member rm <name> [--identity <path>]` | Remove a member and re-sign (then run `rekey`). |
 | `sshare add <name> [--file <path>\|--value <v>]` | Store/update a secret (stdin by default). |
 | `sshare get <name> [--identity <path>]` | Decrypt a secret to stdout. |
 | `sshare ls` | List stored secrets. |
@@ -119,6 +121,25 @@ sshare connect ./secrets --name team        # register it (init does this automa
 sshare vaults                               # team   ok   /abs/path/to/secrets
 sshare get db-prod --vault team > .env       # use it from anywhere, no cd
 ```
+
+## Tamper-evidence (signed members)
+
+The member set *is* the recipient set, so sshare makes it tamper-evident. A maintainer signs
+the member list with their SSH key; every machine pins that authority on first use (TOFU)
+and verifies it **before encrypting**, so a teammate with repo write access can't silently
+add their own key as a recipient.
+
+```sh
+# maintainer: member changes are signed automatically with your key
+sshare member add bob --key ./bob.pub        # signs the member list
+# a teammate, first time on this vault:
+sshare trust                                 # shows the signing authority's fingerprint
+sshare trust accept                          # pin it (verify the fingerprint out-of-band first!)
+```
+
+If the member list is changed without a valid signature by the pinned authority, `add` and
+`rekey` refuse with an error. See
+[docs/design-docs/signed-members-list.md](docs/design-docs/signed-members-list.md).
 
 ## Security notes
 

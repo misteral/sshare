@@ -5,7 +5,6 @@ Prioritized, known debt. Link an item to an execution plan in `active/` when wor
 | Item | Priority | Area | Notes |
 |---|---|---|---|
 | Release bot pushes formula to `main` | High (before branch protection) | CI/release | When `main` is protected, allow the `github-actions` bot to push or switch the step to open a PR — otherwise releases break. See [../RELEASING.md](../RELEASING.md). |
-| Signed members list | High | security | A malicious committer can add their own key as a recipient. Sign `.sshare/members` (maintainer key) to prevent tampering. PRD §10.2. |
 | Build-provenance attestation + signed tags | Medium | supply chain | `actions/attest-build-provenance` in `release.yml` + `git tag -s`; verifiable with `gh attestation verify`. |
 | Per-secret recipients / groups (`grant`/`revoke`) | Medium | feature | v0.1 encrypts every secret to all members. PRD §7/§10.1. |
 | Bump GitHub Actions off Node 20 | Low | CI/release | `actions/checkout`, `upload-artifact`, `download-artifact` log Node 20 deprecation; bump to v5 when stable. |
@@ -18,3 +17,5 @@ Prioritized, known debt. Link an item to an execution plan in `active/` when wor
 
 - **Atomic secret writes** — `write_secret` now writes a temp file + renames (2026-06-22).
 - **End-to-end CLI test** — `tests/cli.rs` drives the built binary (2026-06-22).
+- **Signed members list** — SSHSIG signing + TOFU pinning + verify-before-encrypt makes the
+  member set tamper-evident (2026-06-23, ships in v0.2.0). Follow-up: multi-maintainer (N-of-M).

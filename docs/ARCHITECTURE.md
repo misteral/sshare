@@ -17,8 +17,14 @@ dispatcher over a `Vault` abstraction backed by the filesystem.
 | `src/main.rs` | clap CLI, all stdin/stdout/file I/O, `~/.ssh` default-key resolution, **vault resolution** (`resolve_vault`), one thin `cmd_*` per subcommand | no |
 | `src/vault.rs` | `Vault` type: on-disk layout, member files, secret blobs, name validation; `discover`/`find_from`/`open` | only to build recipients |
 | `src/crypto.rs` | `encrypt` / `decrypt` / `parse_recipient`, passphrase prompt — the only place `age` types live | **yes (exclusively)** |
+| `src/sign.rs` | SSHSIG `sign`/`verify`/`fingerprint_of` over the member set — the only place `ssh-key` types live | no (`ssh-key`, exclusively) |
 | `src/registry.rs` | `Registry` of *connected* vaults (name → local path) in the user's config dir; `connect`/`disconnect`/`list`/`path_of` | no |
+| `src/trust.rs` | `TrustStore` — TOFU pin store (vault id → authority fingerprint) in the config dir | no |
 | `src/test_keys.rs` | throwaway ed25519 keypairs, `#[cfg(test)]` only — never compiled into the binary | no |
+
+`age` lives only in `crypto.rs` and `ssh-key` lives only in `sign.rs` — the two crypto
+libraries are each isolated to one module. Mechanical check: `grep -rl 'ssh_key::' src/`
+returns only `src/sign.rs`.
 
 ## Dependency rules
 
@@ -79,9 +85,21 @@ unregisters and never deletes files.
   current member set. The caller must still be a recipient of every secret. Run after
   `member add`/`member rm` to propagate membership changes to existing secrets.
 
+## Tamper-evidence (signed members list)
+
+The member set is authenticated, not just trusted-because-it's-in-the-repo. A maintainer
+signs the canonical member set (`vault.canonical_members()`) with their SSH key via
+`sign::sign`; the signature is stored in `.sshare/members.sig`. `add`/`rekey` call
+`verify_members_trusted` *before* encrypting: it verifies the signature (`sign::verify`)
+and checks the signer's fingerprint against the per-vault authority pinned in `trust.rs`
+(TOFU). Membership changes (`member add`/`rm`) re-sign and may only be made by the pinned
+maintainer. The pin lives in the config dir, **outside the repo**, so a committer can't
+forge both. See [design-docs/signed-members-list.md](design-docs/signed-members-list.md).
+
 ## Access control is the crypto
 
 There is **no permission-check code**. Authorization is an emergent property of who holds
 a recipient private key. Any feature that appears to "check access" must do so by changing
-the recipient set and re-encrypting — never by gating on a flag or role. See
-[SECURITY.md](SECURITY.md).
+the recipient set and re-encrypting — never by gating on a flag or role. (The signed members
+list above authenticates *which* recipient set is legitimate; it is not a permission gate.)
+See [SECURITY.md](SECURITY.md).
