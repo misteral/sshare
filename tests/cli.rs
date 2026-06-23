@@ -234,6 +234,84 @@ fn connect_use_by_name_from_outside_then_disconnect() {
     );
 }
 
+#[test]
+fn autocommit_and_git_passthrough() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("team");
+    let cfg = dir.path().join("cfg");
+    std::fs::create_dir(&root).unwrap();
+    // Keys live OUTSIDE the vault so the repo holds only sshare's own files.
+    let pubp = dir.path().join("alice.pub");
+    let key = dir.path().join("alice.key");
+    std::fs::write(&pubp, ALICE_PUB).unwrap();
+    std::fs::write(&key, ALICE_KEY).unwrap();
+
+    let run_git = |args: &[&str]| {
+        assert!(
+            Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(args)
+                .output()
+                .unwrap()
+                .status
+                .success(),
+            "git {args:?} failed"
+        );
+    };
+    run_git(&["init", "-q"]);
+    run_git(&["config", "user.email", "t@test"]);
+    run_git(&["config", "user.name", "test"]);
+
+    run_ok(&root, &cfg, &["init"]);
+    run_ok(
+        &root,
+        &cfg,
+        &[
+            "member",
+            "add",
+            "alice",
+            "--key",
+            pubp.to_str().unwrap(),
+            "--identity",
+            key.to_str().unwrap(),
+        ],
+    );
+    assert!(
+        add_secret(&root, &cfg, "db-prod", b"hunter2")
+            .status
+            .success()
+    );
+
+    // Mutations auto-committed; visible through the `git` passthrough.
+    let log = run_ok(&root, &cfg, &["git", "log", "--oneline"]);
+    assert!(log.contains("add member alice"), "log: {log}");
+    assert!(log.contains("add secret db-prod"), "log: {log}");
+    // Everything sshare owns is committed → clean tree.
+    let status = run_ok(&root, &cfg, &["git", "status", "--porcelain"]);
+    assert!(
+        status.trim().is_empty(),
+        "expected clean tree, got: {status}"
+    );
+
+    // SSHARE_NO_AUTOCOMMIT=1 leaves the change uncommitted.
+    let mut child = sshare(&root, &cfg)
+        .env("SSHARE_NO_AUTOCOMMIT", "1")
+        .args(["add", "db2"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(b"z").unwrap();
+    assert!(child.wait_with_output().unwrap().status.success());
+    let status2 = run_ok(&root, &cfg, &["git", "status", "--porcelain"]);
+    assert!(
+        status2.contains("secrets/"),
+        "expected uncommitted secret: {status2}"
+    );
+}
+
 // Second throwaway keypair for the non-maintainer test.
 const MALLORY_PUB: &str = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOzxHqUFE7nQV4hAGBe4RGkxZkdsvpzZhmDViwK/HW+z mallory@sshare-test";
 const MALLORY_KEY: &str = "\
