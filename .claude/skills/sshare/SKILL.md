@@ -197,6 +197,10 @@ with your `~/.ssh/id_ed25519.pub`, then `sshare git pull` — now `sshare get` w
   add/commit`), but **push is explicit**: run `sshare git push` to publish, `sshare git pull`
   to fetch. Network happens *only* on `sshare git push`/`pull`/`fetch` — never on `add`/`get`.
   `SSHARE_NO_AUTOCOMMIT=1` disables autocommit for batch scripts.
+- **`change saved but not committed`** means autocommit failed (usually no git identity, or a
+  pre-commit hook). The secret is safely written **and staged** — set the identity with
+  `sshare git config user.email you@example.com` (and `user.name`), then
+  `sshare git commit -m "sshare: …"`. The data is never at risk; only the commit is pending.
 - **Default keys**: decryption tries `~/.ssh/id_ed25519` then `~/.ssh/id_rsa`; pass
   `--identity <path>` for anything else. Member pubkeys default to your `~/.ssh/*.pub`.
 - **Secret/member names** allow `[A-Za-z0-9._-]`; secrets may nest with `/`
