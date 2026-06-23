@@ -7,8 +7,10 @@ members' SSH **public** keys (via the embedded [`age`](https://github.com/FiloSo
 format) and storing the ciphertext in a git repo. Only a matching SSH **private** key can
 decrypt — that *is* the access control. No server, no accounts, no external `age`/`gpg`.
 
-It is a small crate (~5 source files). The whole program is a clap-driven command
-dispatcher over a `Vault` abstraction backed by the filesystem.
+It is a small crate (7 modules in `src/`). The whole program is a clap-driven command
+dispatcher over a `Vault` abstraction backed by the filesystem, with two isolated crypto
+modules (`crypto.rs` = `age`, `sign.rs` = `ssh-key`) and two config-dir stores (`registry.rs`,
+`trust.rs`).
 
 ## Module map
 

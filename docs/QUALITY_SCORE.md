@@ -3,7 +3,7 @@
 Per-module quality grade and known gaps. Update on a recurring cadence and whenever a
 module changes materially. Grades: A (solid, tested, legible) → D (fragile, untested).
 
-_Last reviewed: 2026-06-22 (post v0.1.1)._
+_Last reviewed: 2026-06-23 (post v0.2.0)._
 
 | Module | Grade | Notes |
 |---|---|---|
@@ -14,12 +14,13 @@ _Last reviewed: 2026-06-22 (post v0.1.1)._
 | `src/sign.rs` | A | SSHSIG over the member set; sole `ssh-key` importer. Unit-tested: sign/verify round-trip, fingerprint match, tamper → fail, garbage → fail. |
 | `src/trust.rs` | A | TOFU pin store; pin/lookup/re-pin/missing-file unit-tested, plus the e2e tamper-rejection and second-machine `trust accept` paths. |
 | `src/test_keys.rs` | n/a | Test-only fixtures (`#[cfg(test)]`). |
-| `.github/workflows/*` | B | CI + release work and are exercised (v0.1.0/v0.1.1 shipped). Gaps: actions pinned by major tag not SHA; Node 20 deprecation warnings; no build-provenance/signing. |
+| `.github/workflows/*` | B | CI + release work and are exercised (shipped through v0.2.0). Gaps: actions pinned by major tag not SHA; Node 20 deprecation warnings; no build-provenance/signing. |
 
 ## Top gaps to close next
 
 1. Supply-chain hardening: build-provenance attestation + signed tags.
-2. Direct tests for `~/.ssh` default-key resolution and the passphrase-prompt path.
-3. Tamper-resistance: a maintainer-signed members list (see [SECURITY.md](SECURITY.md)).
+2. Direct tests for `~/.ssh` default-key resolution and the passphrase-prompt path
+   (both `crypto::decrypt` and `sign`).
+3. Multi-maintainer (N-of-M) signing authorities — signed members is single-authority today.
 
 See [exec-plans/tech-debt-tracker.md](exec-plans/tech-debt-tracker.md) for the full list.

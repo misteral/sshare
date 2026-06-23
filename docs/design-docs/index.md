@@ -5,7 +5,7 @@ Design decisions and the beliefs behind them.
 | Title | Status | Date | File |
 |---|---|---|---|
 | Core Beliefs | Active | 2026-06-21 | [core-beliefs.md](core-beliefs.md) |
-| Connected Vaults | Active | 2026-06-22 | [connected-vaults.md](connected-vaults.md) |
+| Connected Vaults | Implemented | 2026-06-22 | [connected-vaults.md](connected-vaults.md) |
 | Signed Members List (TOFU) | Implemented | 2026-06-23 | [signed-members-list.md](signed-members-list.md) |
 
 ## Decisions captured elsewhere (and where)
@@ -20,8 +20,8 @@ Design decisions and the beliefs behind them.
 
 ## Open design questions (from PRD §10)
 
-1. Recipient granularity: per-secret vs groups vs whole-vault (proposed: groups + overrides).
-2. Tamper-resistance of the members list (signed members file).
-3. Bootstrapping/admin: who may add members.
-4. Convenience: `sshare exec -- <cmd>`, `.env` import/export, clipboard auto-clear.
-5. Key types: `ssh-ed25519` first; whether to allow `ssh-rsa`.
+1. Recipient granularity: per-secret vs groups vs whole-vault (proposed: groups + overrides) — **still open**.
+2. ~~Tamper-resistance of the members list~~ — **resolved** via the signed members list (TOFU); see [signed-members-list.md](signed-members-list.md).
+3. Bootstrapping/admin: who may add members — **addressed** for v1: the first signer becomes the single maintainer/authority; multi-maintainer (N-of-M) is a future extension.
+4. Convenience: `sshare exec -- <cmd>`, `.env` import/export, clipboard auto-clear — **still open**.
+5. ~~Key types `ssh-rsa`~~ — **resolved**: both `ed25519` and `rsa` already work (verified in v0.1.1); `ecdsa`/`dsa` are not supported.

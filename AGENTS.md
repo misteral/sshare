@@ -25,8 +25,8 @@ Rust edition 2024 (≥ 1.85). See [docs/TESTING.md](docs/TESTING.md).
 
 | File | Contents |
 |---|---|
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Module map, `main → vault → crypto` layering, on-disk layout, data flows |
-| [docs/SECURITY.md](docs/SECURITY.md) | Threat model, access-control-is-crypto, boundary rules, revocation caveat |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Module map (crypto/sign/registry/trust), layering, vault resolution, signed-members flow, on-disk layout |
+| [docs/SECURITY.md](docs/SECURITY.md) | Threat model, access-control-is-crypto, signed members (TOFU), boundary rules, revocation caveat |
 | [docs/CODING_STANDARDS.md](docs/CODING_STANDARDS.md) | Edition, lints-as-gates, error handling, forbidden patterns |
 | [docs/TESTING.md](docs/TESTING.md) | Running checks/tests, single test, test layout, manual E2E |
 | [docs/RELEASING.md](docs/RELEASING.md) | Tag → cross-build → GitHub Release → Homebrew formula; versioning, changelog |
@@ -47,12 +47,16 @@ area to work on. Based on the answer, read the relevant `docs/` file before acti
 
 - **Secrets never leak.** Plaintext exits only via `get`'s stdout — never in logs, errors,
   or `anyhow` context. ([docs/SECURITY.md](docs/SECURITY.md))
-- **`age` types stay in `crypto.rs`** (sole exception: the `Recipient` return type in
-  `vault.rs`). Don't add a second encryption path. ([docs/ARCHITECTURE.md](docs/ARCHITECTURE.md))
+- **Crypto libs stay isolated:** `age` types only in `crypto.rs` (sole exception: the
+  `Recipient` return type in `vault.rs`); `ssh-key` types only in `sign.rs`. Don't add a
+  second encryption or signing path. ([docs/ARCHITECTURE.md](docs/ARCHITECTURE.md))
 - **All user-supplied names go through `validate_name`/`validate_component`** before any
   path is built (path-traversal guard).
 - **Access control is the crypto** — express authorization as recipient membership +
   re-encryption, never a role/flag gate.
+- **The member list is signed (TOFU).** `add`/`rekey` verify it via
+  `verify_members_trusted` before encrypting; only the pinned maintainer may change
+  membership. Don't bypass that gate. ([docs/SECURITY.md](docs/SECURITY.md))
 - **Lints are gates.** `clippy --pedantic -D warnings` must stay clean; keep `Cargo.lock`
   committed (the `--locked` gates need it).
 - **`Formula/sshare.rb` is generated** by `release.yml` — edit the workflow heredoc, not
