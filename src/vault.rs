@@ -123,7 +123,7 @@ impl Vault {
     }
 
     fn members_dir(&self) -> PathBuf {
-        self.root.join(VAULT_DIR).join(MEMBERS_DIR)
+        self.sshare_dir().join(MEMBERS_DIR)
     }
 
     fn secrets_dir(&self) -> PathBuf {
@@ -232,7 +232,7 @@ impl Vault {
     }
 
     fn descriptions_dir(&self) -> PathBuf {
-        self.root.join(VAULT_DIR).join(DESCRIPTIONS_DIR)
+        self.sshare_dir().join(DESCRIPTIONS_DIR)
     }
 
     fn desc_path(&self, name: &str) -> PathBuf {

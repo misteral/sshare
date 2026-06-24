@@ -271,6 +271,62 @@ fn description_set_keep_and_clear_semantics() {
 }
 
 #[test]
+fn ls_descriptions_degrades_when_one_cannot_be_decrypted() {
+    let f = Fixture::setup();
+    let alice = f.key.to_str().unwrap();
+
+    // A described secret, encrypted to alice only, plus a plain one.
+    assert!(
+        add_secret_with(
+            &f.root,
+            &f.cfg,
+            "noted",
+            b"v",
+            &["--description", "alice-only note"]
+        )
+        .status
+        .success()
+    );
+    assert!(add_secret(&f.root, &f.cfg, "plain", b"v").status.success());
+    // Alice (a recipient) still reads everything fine.
+    assert!(
+        run_ok(
+            &f.root,
+            &f.cfg,
+            &["ls", "--descriptions", "--identity", alice]
+        )
+        .contains("alice-only note")
+    );
+
+    // Mallory holds a valid key but was never a recipient, so "noted" won't decrypt.
+    let mkey = f.root.join("mallory.key");
+    std::fs::write(&mkey, MALLORY_KEY).unwrap();
+    let out = sshare(&f.root, &f.cfg)
+        .args(["ls", "--descriptions", "--identity", mkey.to_str().unwrap()])
+        .output()
+        .unwrap();
+
+    // One undecryptable note must not abort the listing: it still succeeds and names every
+    // secret, reporting the failure on stderr rather than swallowing the rest of the list.
+    assert!(
+        out.status.success(),
+        "ls --descriptions aborted on one bad note: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("noted"), "missing 'noted': {stdout}");
+    assert!(
+        stdout.contains("plain"),
+        "missing 'plain' after the bad note: {stdout}"
+    );
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("cannot decrypt the description for 'noted'"),
+        "no warning for the undecryptable description: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
 fn get_with_pubkey_path_fails_with_actionable_message() {
     let f = Fixture::setup();
     assert!(add_secret(&f.root, &f.cfg, "s1", b"x").status.success());

@@ -551,10 +551,20 @@ fn cmd_ls(selector: Option<&str>, descriptions: bool, identity: Option<&Path>) -
                 if id.is_none() {
                     id = Some(resolve_identity(identity.map(Path::to_path_buf))?);
                 }
-                let plaintext =
-                    crypto::decrypt(&blob, id.as_deref().expect("identity resolved"))
-                        .with_context(|| format!("cannot decrypt the description for '{name}'"))?;
-                println!("{name:<24}  {}", String::from_utf8_lossy(&plaintext));
+                // Degrade per-secret: a description we can't read (e.g. a stale blob not yet
+                // rekeyed to our key) shouldn't abort the whole listing the way `get` aborts a
+                // single fetch. Warn on stderr, still list the name, and keep going.
+                match crypto::decrypt(&blob, id.as_deref().expect("identity resolved")) {
+                    Ok(plaintext) => {
+                        // Collapse newlines so one secret stays one row in the aligned listing.
+                        let note = String::from_utf8_lossy(&plaintext).replace(['\n', '\r'], " ");
+                        println!("{name:<24}  {note}");
+                    }
+                    Err(e) => {
+                        eprintln!("warning: cannot decrypt the description for '{name}': {e:#}");
+                        println!("{name}");
+                    }
+                }
             }
         }
     }
