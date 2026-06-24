@@ -51,10 +51,16 @@ A vault is any directory containing a `.sshare/` folder. `Vault::discover()` wal
 parent directories looking for `.sshare/config.toml`.
 
 ```text
-<root>/.sshare/config.toml        # marks the vault root (version = 1)
-<root>/.sshare/members/<name>.pub # one SSH public key per member (file stem = member name)
-<root>/secrets/<name>.age         # age ciphertext; nestable, e.g. secrets/prod/api-token.age
+<root>/.sshare/config.toml             # marks the vault root (version = 1)
+<root>/.sshare/members/<name>.pub      # one SSH public key per member (file stem = member name)
+<root>/.sshare/descriptions/<name>.age # optional encrypted secret description (same members)
+<root>/secrets/<name>.age              # age ciphertext; nestable, e.g. secrets/prod/api-token.age
 ```
+
+A secret's optional description is encrypted (to the same members) and kept in its own
+`descriptions/` tree, not beside the secret — so it can't collide with a secret name and
+`secret_names()` stays a plain walk of `secrets/`. `rekey` re-encrypts descriptions too;
+`rm` deletes a secret's description alongside it.
 
 The repo is the transport. **The CLI makes no network calls by default** and
 **auto-commits locally** when the vault is a git repo (`git.rs`); network (push/pull/fetch)

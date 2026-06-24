@@ -79,6 +79,10 @@ enum Command {
         /// Provide the value inline (avoid: visible in shell history).
         #[arg(long)]
         value: Option<String>,
+        /// Optional note about the secret, stored encrypted for all members. Omit to keep
+        /// any existing description; pass an empty string to clear it.
+        #[arg(long)]
+        description: Option<String>,
     },
     /// Decrypt a secret and write it to stdout.
     Get {
@@ -89,7 +93,15 @@ enum Command {
         identity: Option<PathBuf>,
     },
     /// List stored secrets.
-    Ls,
+    Ls {
+        /// Also show each secret's description (decrypts them with your SSH key).
+        #[arg(long, short)]
+        descriptions: bool,
+        /// SSH private key to decrypt descriptions with (default: your key in ~/.ssh).
+        /// Only used with `--descriptions`.
+        #[arg(long, short)]
+        identity: Option<PathBuf>,
+    },
     /// Remove a stored secret.
     Rm {
         /// Secret name to remove.
@@ -156,9 +168,17 @@ fn main() -> Result<()> {
         Command::Member(MemberCommand::Rm { name, identity }) => {
             cmd_member_rm(sel, &name, identity.as_deref())
         }
-        Command::Add { name, file, value } => cmd_add(sel, &name, file.as_deref(), value),
+        Command::Add {
+            name,
+            file,
+            value,
+            description,
+        } => cmd_add(sel, &name, file.as_deref(), value, description.as_deref()),
         Command::Get { name, identity } => cmd_get(sel, &name, identity),
-        Command::Ls => cmd_ls(sel),
+        Command::Ls {
+            descriptions,
+            identity,
+        } => cmd_ls(sel, descriptions, identity.as_deref()),
         Command::Rm { name } => cmd_rm(sel, &name),
         Command::Rekey { identity } => cmd_rekey(sel, identity),
     }
@@ -460,6 +480,7 @@ fn cmd_add(
     name: &str,
     file: Option<&Path>,
     value: Option<String>,
+    description: Option<&str>,
 ) -> Result<()> {
     let vault = resolve_vault(selector)?;
     verify_members_trusted(&vault)?;
@@ -478,6 +499,16 @@ fn cmd_add(
     };
     let blob = crypto::encrypt(&plaintext, &recipients)?;
     vault.write_secret(name, &blob)?;
+    // --description sets/clears/leaves the note: a non-empty value (re)writes it (encrypted),
+    // an empty string clears it, and omitting the flag leaves any existing one untouched.
+    match description {
+        Some("") => vault.remove_description(name)?,
+        Some(text) => {
+            let desc_blob = crypto::encrypt(text.as_bytes(), &recipients)?;
+            vault.write_description(name, &desc_blob)?;
+        }
+        None => {}
+    }
     let verb = if existed { "update" } else { "add" };
     maybe_autocommit(&vault, &format!("sshare: {verb} secret {name}"));
     println!(
@@ -496,14 +527,36 @@ fn cmd_get(selector: Option<&str>, name: &str, identity: Option<PathBuf>) -> Res
     Ok(())
 }
 
-fn cmd_ls(selector: Option<&str>) -> Result<()> {
-    let names = resolve_vault(selector)?.secret_names()?;
+fn cmd_ls(selector: Option<&str>, descriptions: bool, identity: Option<&Path>) -> Result<()> {
+    let vault = resolve_vault(selector)?;
+    let names = vault.secret_names()?;
     if names.is_empty() {
         println!("(no secrets yet — store one with 'sshare add <name>')");
         return Ok(());
     }
+    if !descriptions {
+        for name in names {
+            println!("{name}");
+        }
+        return Ok(());
+    }
+    // Resolve the identity lazily: secrets without a description (every secret stored before
+    // this feature) need no key, so `ls --descriptions` only asks for one once it hits a
+    // description it must decrypt.
+    let mut id: Option<PathBuf> = None;
     for name in names {
-        println!("{name}");
+        match vault.read_description(&name)? {
+            None => println!("{name}"),
+            Some(blob) => {
+                if id.is_none() {
+                    id = Some(resolve_identity(identity.map(Path::to_path_buf))?);
+                }
+                let plaintext =
+                    crypto::decrypt(&blob, id.as_deref().expect("identity resolved"))
+                        .with_context(|| format!("cannot decrypt the description for '{name}'"))?;
+                println!("{name:<24}  {}", String::from_utf8_lossy(&plaintext));
+            }
+        }
     }
     Ok(())
 }
@@ -531,6 +584,18 @@ fn cmd_rekey(selector: Option<&str>, identity: Option<PathBuf>) -> Result<()> {
             .with_context(|| format!("cannot decrypt '{name}' — is your key still a recipient?"))?;
         let reencrypted = crypto::encrypt(&plaintext, &recipients)?;
         vault.write_secret(name, &reencrypted)?;
+
+        // Re-encrypt the description alongside its secret, so a newly added member can read
+        // it and a removed one no longer can.
+        if let Some(desc_blob) = vault.read_description(name)? {
+            let desc_plain = crypto::decrypt(&desc_blob, &identity).with_context(|| {
+                format!(
+                    "cannot decrypt the description for '{name}' — is your key still a recipient?"
+                )
+            })?;
+            let desc_reencrypted = crypto::encrypt(&desc_plain, &recipients)?;
+            vault.write_description(name, &desc_reencrypted)?;
+        }
     }
     maybe_autocommit(
         &vault,

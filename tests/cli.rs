@@ -37,8 +37,15 @@ fn run_ok(cwd: &Path, cfg: &Path, args: &[&str]) -> String {
 
 /// Stores a secret by piping the value on stdin; captures stdout/stderr.
 fn add_secret(cwd: &Path, cfg: &Path, name: &str, value: &[u8]) -> Output {
+    add_secret_with(cwd, cfg, name, value, &[])
+}
+
+/// Like [`add_secret`], but appends `extra` flags (e.g. `--description`) to the `add` call.
+fn add_secret_with(cwd: &Path, cfg: &Path, name: &str, value: &[u8], extra: &[&str]) -> Output {
+    let mut args = vec!["add", name];
+    args.extend_from_slice(extra);
     let mut child = sshare(cwd, cfg)
-        .args(["add", name])
+        .args(&args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -128,6 +135,139 @@ fn remove_secret() {
         .unwrap();
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("no such secret"));
+}
+
+#[test]
+fn description_is_encrypted_listed_and_survives_rekey() {
+    let f = Fixture::setup();
+    let alice = f.key.to_str().unwrap();
+
+    assert!(
+        add_secret_with(
+            &f.root,
+            &f.cfg,
+            "db-prod",
+            b"hunter2",
+            &["--description", "prod read replica"],
+        )
+        .status
+        .success()
+    );
+
+    // Plain `ls` shows only the name — the description must not leak into the listing.
+    let plain = run_ok(&f.root, &f.cfg, &["ls"]);
+    assert!(plain.contains("db-prod"));
+    assert!(
+        !plain.contains("prod read replica"),
+        "plain `ls` leaked the description: {plain}"
+    );
+
+    // `ls --descriptions` decrypts and shows it.
+    let listed = run_ok(
+        &f.root,
+        &f.cfg,
+        &["ls", "--descriptions", "--identity", alice],
+    );
+    assert!(
+        listed.contains("db-prod") && listed.contains("prod read replica"),
+        "ls --descriptions: {listed}"
+    );
+
+    // The value rode in a separate blob, so `get` is byte-for-byte unchanged.
+    let val = sshare(&f.root, &f.cfg)
+        .args(["get", "db-prod", "--identity", alice])
+        .output()
+        .unwrap();
+    assert_eq!(val.stdout, b"hunter2");
+
+    // Add a second member and rekey; the description is re-encrypted for them too.
+    let mpub = f.root.join("mallory.pub");
+    let mkey = f.root.join("mallory.key");
+    std::fs::write(&mpub, MALLORY_PUB).unwrap();
+    std::fs::write(&mkey, MALLORY_KEY).unwrap();
+    run_ok(
+        &f.root,
+        &f.cfg,
+        &[
+            "member",
+            "add",
+            "mallory",
+            "--key",
+            mpub.to_str().unwrap(),
+            "--identity",
+            alice,
+        ],
+    );
+    run_ok(&f.root, &f.cfg, &["rekey", "--identity", alice]);
+
+    // Mallory — who wasn't a recipient when the description was written — can now read it.
+    let listed_m = run_ok(
+        &f.root,
+        &f.cfg,
+        &["ls", "--descriptions", "--identity", mkey.to_str().unwrap()],
+    );
+    assert!(
+        listed_m.contains("prod read replica"),
+        "mallory could not read the description after rekey: {listed_m}"
+    );
+
+    // Removing the secret drops its description blob too (no orphan left behind).
+    run_ok(&f.root, &f.cfg, &["rm", "db-prod"]);
+    assert!(
+        !f.root.join(".sshare/descriptions/db-prod.age").exists(),
+        "description blob orphaned after rm"
+    );
+}
+
+#[test]
+fn description_set_keep_and_clear_semantics() {
+    let f = Fixture::setup();
+    let alice = f.key.to_str().unwrap();
+    let list = |f: &Fixture| {
+        run_ok(
+            &f.root,
+            &f.cfg,
+            &["ls", "--descriptions", "--identity", alice],
+        )
+    };
+
+    // Set a description.
+    assert!(
+        add_secret_with(
+            &f.root,
+            &f.cfg,
+            "svc",
+            b"v1",
+            &["--description", "first note"]
+        )
+        .status
+        .success()
+    );
+    assert!(list(&f).contains("first note"));
+
+    // Re-storing the value WITHOUT --description keeps the existing note.
+    assert!(
+        add_secret_with(&f.root, &f.cfg, "svc", b"v2", &[])
+            .status
+            .success()
+    );
+    assert!(
+        list(&f).contains("first note"),
+        "description should persist across a plain update"
+    );
+
+    // An empty --description clears it, leaving the secret itself in place.
+    assert!(
+        add_secret_with(&f.root, &f.cfg, "svc", b"v3", &["--description", ""])
+            .status
+            .success()
+    );
+    let cleared = list(&f);
+    assert!(
+        !cleared.contains("first note"),
+        "description not cleared: {cleared}"
+    );
+    assert!(cleared.contains("svc"), "secret vanished: {cleared}");
 }
 
 #[test]
