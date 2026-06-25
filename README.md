@@ -107,11 +107,11 @@ export DB_PASSWORD="$(sshare get db-prod)"
 | `sshare member add <name> [--key <path\|->] [--identity <path>]` | Register a member's SSH public key and re-sign the member list. |
 | `sshare member ls` | List members. |
 | `sshare member rm <name> [--identity <path>]` | Remove a member and re-sign (then run `rekey`). |
-| `sshare add <name> [--file <path>\|--value <v>]` | Store/update a secret. Prompts (hidden) when interactive; otherwise reads stdin / `--file` / `--value`. |
+| `sshare add <name> [--file <path>\|--value <v>] [--description <text>]` | Store/update a secret. Prompts (hidden) when interactive; otherwise reads stdin / `--file` / `--value`. `--description` stores an encrypted note (`--description ""` clears it). |
 | `sshare get <name> [--identity <path>]` | Decrypt a secret to stdout. |
-| `sshare ls` | List stored secrets. |
-| `sshare rm <name>` | Remove a stored secret. |
-| `sshare rekey [--identity <path>]` | Re-encrypt all secrets for the current members. |
+| `sshare ls [--descriptions] [--identity <path>]` | List stored secrets; with `--descriptions` also decrypt and show each note. |
+| `sshare rm <name>` | Remove a stored secret (and its description). |
+| `sshare rekey [--identity <path>]` | Re-encrypt all secrets (and descriptions) for the current members. |
 
 Any command that operates on a vault also accepts a global **`--vault <name>`** (or the
 `SSHARE_VAULT` env var) to target a connected vault from anywhere — otherwise sshare uses

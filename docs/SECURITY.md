@@ -41,6 +41,13 @@ by re-encryption — never as a role/flag gate that could be bypassed by editing
   and is documented as discouraged.
 - Secret *names* and the *set of member public keys* are visible to anyone with repo
   access — only secret *values* are protected. Do not put sensitive data in secret names.
+- **Secret descriptions are encrypted** to the same members as the secret, stored as their
+  own `age` blob under `.sshare/descriptions/<name>.age` — never plaintext in the repo. This
+  is deliberate: a free-form note ("key for the PII export job") is exactly where sensitive
+  context lands, so it gets the same confidentiality as the value (the git host only ever
+  sees ciphertext). Consequences: reading a description requires a recipient key
+  (`ls --descriptions` decrypts), `rekey` re-encrypts descriptions to the current member set
+  so revocation applies to them too, and only a description's *existence and length* leak.
 
 ## Tamper-evidence: signed members list (TOFU)
 

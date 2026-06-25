@@ -5,10 +5,16 @@
 //! ```text
 //! <root>/
 //!   .sshare/
-//!     config.toml          # marks the vault root
-//!     members/<name>.pub   # one SSH public key per member
-//!   secrets/<name>.age     # age-encrypted secret blobs
+//!     config.toml             # marks the vault root
+//!     members/<name>.pub      # one SSH public key per member
+//!     descriptions/<name>.age # optional, encrypted secret descriptions
+//!   secrets/<name>.age        # age-encrypted secret blobs
 //! ```
+//!
+//! A secret's optional human-readable description is stored as its own age blob, encrypted
+//! to the same members as the secret. It lives in a separate `descriptions/` tree (rather
+//! than beside the secret) so a description can never collide with a secret name, and so
+//! `secret_names` stays a plain walk of `secrets/`.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -19,6 +25,7 @@ use crate::crypto;
 
 const VAULT_DIR: &str = ".sshare";
 const MEMBERS_DIR: &str = "members";
+const DESCRIPTIONS_DIR: &str = "descriptions";
 const SECRETS_DIR: &str = "secrets";
 const CONFIG_FILE: &str = "config.toml";
 const VAULT_ID_FILE: &str = "id";
@@ -116,7 +123,7 @@ impl Vault {
     }
 
     fn members_dir(&self) -> PathBuf {
-        self.root.join(VAULT_DIR).join(MEMBERS_DIR)
+        self.sshare_dir().join(MEMBERS_DIR)
     }
 
     fn secrets_dir(&self) -> PathBuf {
@@ -224,30 +231,68 @@ impl Vault {
         self.secrets_dir().join(format!("{name}.{SECRET_EXT}"))
     }
 
+    fn descriptions_dir(&self) -> PathBuf {
+        self.sshare_dir().join(DESCRIPTIONS_DIR)
+    }
+
+    fn desc_path(&self, name: &str) -> PathBuf {
+        self.descriptions_dir().join(format!("{name}.{SECRET_EXT}"))
+    }
+
     /// Writes an encrypted blob for `name`, creating parent directories as needed.
     ///
-    /// The write is atomic: the blob is written to a temporary file in the same directory
-    /// and then renamed over the target, so a reader (or an interrupted run) never observes
-    /// a half-written secret.
+    /// The write is atomic (see [`write_atomic`]), so a reader (or an interrupted run) never
+    /// observes a half-written secret.
     ///
     /// # Errors
     ///
     /// Returns an error if `name` is invalid or the file cannot be written.
     pub(crate) fn write_secret(&self, name: &str, blob: &[u8]) -> Result<()> {
         validate_name(name)?;
-        let path = self.secret_path(name);
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
+        write_atomic(&self.secret_path(name), blob)
+    }
+
+    /// Writes the encrypted description blob for `name` (atomic, like [`Self::write_secret`]).
+    ///
+    /// The blob is the description ciphertext, encrypted to the same members as the secret.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `name` is invalid or the file cannot be written.
+    pub(crate) fn write_description(&self, name: &str, blob: &[u8]) -> Result<()> {
+        validate_name(name)?;
+        write_atomic(&self.desc_path(name), blob)
+    }
+
+    /// Reads the encrypted description blob for `name`, or `None` if the secret has no
+    /// description (the common case, and every pre-0.6 secret).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `name` is invalid or the file exists but cannot be read.
+    pub(crate) fn read_description(&self, name: &str) -> Result<Option<Vec<u8>>> {
+        validate_name(name)?;
+        let path = self.desc_path(name);
+        match fs::read(&path) {
+            Ok(blob) => Ok(Some(blob)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e).with_context(|| format!("cannot read {}", path.display())),
         }
-        // Same-directory temp keeps the rename on one filesystem (atomic on Unix); the pid
-        // suffix avoids collisions between concurrent writers.
-        let tmp = path.with_extension(format!("{SECRET_EXT}.tmp.{}", std::process::id()));
-        fs::write(&tmp, blob).with_context(|| format!("cannot write {}", tmp.display()))?;
-        if let Err(e) = fs::rename(&tmp, &path) {
-            let _ = fs::remove_file(&tmp);
-            return Err(e).with_context(|| format!("cannot write {}", path.display()));
+    }
+
+    /// Removes the description for `name` if present; succeeds if there was none.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `name` is invalid or an existing file cannot be removed.
+    pub(crate) fn remove_description(&self, name: &str) -> Result<()> {
+        validate_name(name)?;
+        let path = self.desc_path(name);
+        match fs::remove_file(&path) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(e).with_context(|| format!("cannot remove {}", path.display())),
         }
-        Ok(())
     }
 
     /// Reads the encrypted blob for `name`.
@@ -276,6 +321,8 @@ impl Vault {
             bail!("no such secret '{name}'");
         }
         fs::remove_file(&path).with_context(|| format!("cannot remove {}", path.display()))?;
+        // Drop the description sidecar too, so removing a secret leaves nothing orphaned.
+        self.remove_description(name)?;
         Ok(())
     }
 
@@ -348,6 +395,25 @@ impl Vault {
         let path = self.sshare_dir().join(MEMBERS_SIG_FILE);
         fs::write(&path, armored).with_context(|| format!("cannot write {}", path.display()))
     }
+}
+
+/// Atomically writes `blob` to `path`, creating parent directories as needed.
+///
+/// The blob is written to a temporary file in the same directory and then renamed over the
+/// target, so a reader (or an interrupted run) never observes a half-written file.
+fn write_atomic(path: &Path, blob: &[u8]) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    // Same-directory temp keeps the rename on one filesystem (atomic on Unix); the pid
+    // suffix avoids collisions between concurrent writers.
+    let tmp = path.with_extension(format!("{SECRET_EXT}.tmp.{}", std::process::id()));
+    fs::write(&tmp, blob).with_context(|| format!("cannot write {}", tmp.display()))?;
+    if let Err(e) = fs::rename(&tmp, path) {
+        let _ = fs::remove_file(&tmp);
+        return Err(e).with_context(|| format!("cannot write {}", path.display()));
+    }
+    Ok(())
 }
 
 /// Generates a random 128-bit hex id for a new vault.
@@ -482,6 +548,45 @@ mod tests {
         vault.remove_secret("tmp").unwrap();
         assert!(!vault.has_secret("tmp"));
         assert!(vault.remove_secret("tmp").is_err());
+    }
+
+    #[test]
+    fn description_round_trips_and_is_not_a_secret() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = Vault::init(dir.path()).unwrap();
+        vault.write_secret("db", b"cipher").unwrap();
+
+        // No description by default.
+        assert!(vault.read_description("db").unwrap().is_none());
+
+        // A nested name works and round-trips its (here, opaque) blob.
+        vault.write_secret("prod/api", b"cipher2").unwrap();
+        vault.write_description("prod/api", b"desc-cipher").unwrap();
+        assert_eq!(
+            vault.read_description("prod/api").unwrap().unwrap(),
+            b"desc-cipher"
+        );
+
+        // Descriptions live outside secrets/, so they never show up as secrets.
+        assert_eq!(
+            vault.secret_names().unwrap(),
+            vec!["db".to_owned(), "prod/api".to_owned()]
+        );
+    }
+
+    #[test]
+    fn removing_a_secret_cascades_to_its_description() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = Vault::init(dir.path()).unwrap();
+        vault.write_secret("db", b"cipher").unwrap();
+        vault.write_description("db", b"desc-cipher").unwrap();
+
+        vault.remove_secret("db").unwrap();
+        assert!(!vault.has_secret("db"));
+        assert!(vault.read_description("db").unwrap().is_none());
+
+        // remove_description is idempotent — removing an absent one is fine.
+        vault.remove_description("db").unwrap();
     }
 
     #[test]

@@ -78,9 +78,9 @@ target a connected vault from anywhere.
 | `sshare member add <name> [--key <path\|->] [--identity <path>]` | Register a member's SSH **public** key and re-sign the member list (only the maintainer may). |
 | `sshare member ls` | List members. |
 | `sshare member rm <name> [--identity <path>]` | Remove a member and re-sign (then `rekey`, then rotate). |
-| `sshare add <name> [--file <path>] [--value <v>]` | Store/update a secret. **Prompts (hidden) when interactive**; else reads stdin / `--file` / `--value`. Name may nest: `prod/api-token`. |
+| `sshare add <name> [--file <path>] [--value <v>] [--description <text>]` | Store/update a secret. **Prompts (hidden) when interactive**; else reads stdin / `--file` / `--value`. Name may nest: `prod/api-token`. `--description` stores an **encrypted** note (omit to keep an existing one; `--description ""` clears it). |
 | `sshare get <name> [--identity <path>]` | Decrypt a secret to **stdout** (raw bytes, no added newline). |
-| `sshare ls` | List stored secret names. |
+| `sshare ls [--descriptions] [--identity <path>]` | List stored secret names. With `--descriptions` (`-d`), also decrypt and show each secret's description (needs your SSH key). |
 | `sshare rm <name>` | Remove a stored secret (auto-commits). |
 | `sshare rekey [--identity <path>]` | Re-encrypt every secret for the current member set. Run after add/rm member. |
 | `sshare git <args…>` | Run git inside the vault: `sshare git push`, `git pull`, `git log`. The only command that touches the network. |
@@ -126,6 +126,7 @@ sshare add github/ci-token
 sshare add github/ci-token --file ./token.txt
 # Or via stdin (for scripts):
 printf '%s' '<the-token>' | sshare add github/ci-token
+# Optionally attach a note (stored encrypted): add --description "CI token, rotate quarterly"
 sshare git push        # the add auto-committed locally; this publishes it
 ```
 
@@ -143,6 +144,7 @@ sshare git push
 
 **"What secrets / members do we have?"**: `sshare ls` · `sshare member ls`
 (Note: in the current version every member can read **every** secret — see Gotchas.)
+To also see what each secret is for: `sshare ls --descriptions` (decrypts notes with your key).
 
 **"Give <teammate> access"** (onboard — must be run by the maintainer, whose key signs):
 ```sh
@@ -216,6 +218,10 @@ with your `~/.ssh/id_ed25519.pub`, then `sshare git pull` — now `sshare get` w
 - **Secret/member names** allow `[A-Za-z0-9._-]`; secrets may nest with `/`
   (`prod/api-token`). Names and the member key set are visible to anyone with repo
   access — only secret *values* are protected. Don't put sensitive data in a name.
+- **Descriptions are encrypted** (unlike names), so a note *may* hold sensitive context. The
+  trade-off: `sshare ls --descriptions` must decrypt with your SSH key, and descriptions are
+  invisible to non-recipients (web review, CI). They re-encrypt on `rekey`, so a newly added
+  member can read them and a removed one cannot. Only their existence/length leaks to the repo.
 - **The member list is signed; changes need the maintainer key.** `member add`/`rm` re-sign
   with `--identity` and only the pinned maintainer may change membership. The first signer of
   a vault becomes its authority. On a new machine, `add`/`rekey` require `sshare trust accept`
