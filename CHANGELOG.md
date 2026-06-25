@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-06-25
+
+### Added
+
+- **Optional encrypted descriptions for secrets.** A secret can now carry a human-readable
+  note, stored as its own `age` blob encrypted to the same members as the value — so it never
+  leaks plaintext to the git host.
+  - `sshare add <name> --description <text>` sets the note; `--description ""` clears it, and
+    omitting the flag leaves any existing note untouched.
+  - `sshare ls --descriptions` (`-d`) decrypts and shows notes (with `--identity`/`-i`); plain
+    `sshare ls` is unchanged (name-only, no key needed). A note that can't be decrypted is
+    reported on stderr and skipped, so one stale note never aborts the whole listing.
+  - `sshare rekey` re-encrypts descriptions alongside secrets; `sshare rm` cascades to the
+    description blob. `sshare get` is untouched and remains byte-for-byte identical.
+
 ## [0.5.0] - 2026-06-23
 
 ### Changed
@@ -102,7 +117,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `sshare rekey` — re-encrypt every secret for the current member set.
 - Path-traversal-safe, nestable secret names (e.g. `prod/api-token`).
 
-[Unreleased]: https://github.com/misteral/sshare/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/misteral/sshare/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/misteral/sshare/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/misteral/sshare/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/misteral/sshare/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/misteral/sshare/compare/v0.2.0...v0.3.0
