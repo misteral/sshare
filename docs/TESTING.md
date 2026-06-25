@@ -29,14 +29,19 @@ binary crate, so there is no `--lib`):
   (legacy-PEM → convert hint, `.pub`-path hint).
 - `vault.rs` — init layout + double-init rejection, member add/list/remove, invalid-key
   rejection, nested+sorted secret listing, **path-traversal rejection**, atomic write
-  (overwrite + no temp leftover).
+  (overwrite + no temp leftover), and **descriptions** (round-trip + not listed as a secret;
+  `rm` cascades to the description; `remove_description` is idempotent).
 - `test_keys.rs` — throwaway ed25519 keypairs (`ALICE`, `MALLORY`) plus a legacy EC-PEM key.
   These are NOT real credentials and are compiled only under `#[cfg(test)]`.
 
 **Integration tests** live in `tests/cli.rs` — they spawn the built binary
 (`env!("CARGO_BIN_EXE_sshare")`) and drive the real CLI through `init → member add → add →
-get → ls`, plus the `.pub`-path error case. They embed their own throwaway ed25519 key
-(crate-internal `test_keys` isn't visible to integration tests).
+get → ls`, plus the `.pub`-path error case. **Descriptions** are covered end-to-end: a note
+is encrypted (plain `ls` never leaks it), `ls --descriptions` decrypts it, `get` stays
+byte-exact, it survives `rekey` (a newly added member can read it), `rm` leaves no orphan
+blob, the set/keep/clear (`--description ""`) semantics, and `ls --descriptions` degrading
+when one note can't be decrypted. They embed their own throwaway ed25519 key (crate-internal
+`test_keys` isn't visible to integration tests).
 
 ## Writing tests
 

@@ -3,13 +3,13 @@
 Per-module quality grade and known gaps. Update on a recurring cadence and whenever a
 module changes materially. Grades: A (solid, tested, legible) → D (fragile, untested).
 
-_Last reviewed: 2026-06-23 (post v0.2.0)._
+_Last reviewed: 2026-06-25 (post v0.6.0: encrypted secret descriptions)._
 
 | Module | Grade | Notes |
 |---|---|---|
 | `src/crypto.rs` | A | `age` isolated here; round-trip, wrong-key, multi-recipient, and unreadable-key (legacy-PEM / `.pub`) paths tested. Gap: the `PassphrasePrompt` callback (encrypted-key path) is not unit-tested. |
-| `src/vault.rs` | A | Path-traversal guard, init/member/secret flows, and **atomic write** (no temp leftover) all tested. |
-| `src/main.rs` | A− | Covered by end-to-end CLI tests (`tests/cli.rs`: core flow + connect/`--vault`/disconnect). Gap: `~/.ssh` default-key resolution still has no direct test (tests pass explicit `--key`/`--identity`). |
+| `src/vault.rs` | A | Path-traversal guard, init/member/secret flows, **atomic write** (no temp leftover; shared `write_atomic`), and **encrypted descriptions** (round-trip, not-a-secret, `rm` cascade, idempotent remove) all tested. |
+| `src/main.rs` | A− | Covered by end-to-end CLI tests (`tests/cli.rs`: core flow + connect/`--vault`/disconnect + **descriptions** encrypt/list/rekey/clear/degrade). Gap: `~/.ssh` default-key resolution still has no direct test (tests pass explicit `--key`/`--identity`). |
 | `src/registry.rs` | A | Connected-vault registry; `connect`/`disconnect`/lookup/idempotency/invalid-name/missing-file all unit-tested (via `load_from(tempdir)`), plus the e2e `connect`→`--vault`→`disconnect` path. |
 | `src/sign.rs` | A | SSHSIG over the member set; sole `ssh-key` importer. Unit-tested: sign/verify round-trip, fingerprint match, tamper → fail, garbage → fail. |
 | `src/trust.rs` | A | TOFU pin store; pin/lookup/re-pin/missing-file unit-tested, plus the e2e tamper-rejection and second-machine `trust accept` paths. |

@@ -8,6 +8,7 @@ Design decisions and the beliefs behind them.
 | Connected Vaults | Implemented | 2026-06-22 | [connected-vaults.md](connected-vaults.md) |
 | Signed Members List (TOFU) | Implemented | 2026-06-23 | [signed-members-list.md](signed-members-list.md) |
 | Git Integration (autocommit + passthrough) | Implemented | 2026-06-23 | [git-integration.md](git-integration.md) |
+| Encrypted Secret Descriptions | Implemented | 2026-06-25 | [descriptions.md](descriptions.md) |
 
 ## Decisions captured elsewhere (and where)
 
