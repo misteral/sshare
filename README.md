@@ -9,8 +9,10 @@ SSH **private** key.
 
 No server, no new accounts, no extra infrastructure — just a git repo and SSH keys.
 
-Built on the audited [`age`](https://github.com/FiloSottile/age) encryption format
-(embedded as a Rust library, so there is **no external `age` dependency**).
+Built on the open [`age`](https://github.com/FiloSottile/age) encryption format
+([spec](https://github.com/C2SP/C2SP/blob/main/age.md)), via the Rust [`age`](https://crates.io/crates/age)
+crate from [rage](https://github.com/str4d/rage) — embedded as a library, so there is
+**no external `age` dependency**.
 
 See [`PRD.md`](./PRD.md) for the full product spec.
 
