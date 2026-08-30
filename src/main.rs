@@ -768,8 +768,10 @@ fn cmd_rekey(
     let mut items = Vec::with_capacity(names.len());
     let mut legacy = Vec::new();
     for name in &names {
+        // The inner error already says why (not a recipient, bound to another vault, …), so
+        // the context only names the secret.
         let secret = crypto::decrypt(&vault.read_secret(name)?, &vault_id, &identity)
-            .with_context(|| format!("cannot decrypt '{name}' — is your key still a recipient?"))?;
+            .with_context(|| format!("cannot re-encrypt '{name}'"))?;
         if secret.binding == crypto::Binding::Legacy {
             legacy.push(name.clone());
         }
@@ -777,11 +779,8 @@ fn cmd_rekey(
         // and a removed one no longer can.
         let description = match vault.read_description(name)? {
             Some(blob) => {
-                let plain = crypto::decrypt(&blob, &vault_id, &identity).with_context(|| {
-                    format!(
-                        "cannot decrypt the description for '{name}' — is your key still a recipient?"
-                    )
-                })?;
+                let plain = crypto::decrypt(&blob, &vault_id, &identity)
+                    .with_context(|| format!("cannot re-encrypt the description for '{name}'"))?;
                 if plain.binding == crypto::Binding::Legacy {
                     legacy.push(format!("{name} (description)"));
                 }
