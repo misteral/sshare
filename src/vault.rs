@@ -15,6 +15,11 @@
 //! to the same members as the secret. It lives in a separate `descriptions/` tree (rather
 //! than beside the secret) so a description can never collide with a secret name, and so
 //! `secret_names` stays a plain walk of `secrets/`.
+//!
+//! Everything under the vault arrives via git, i.e. from other committers. Names are
+//! validated lexically (`validate_name`), and on top of that writes never follow a symlink
+//! inside the vault and symlinked entries are never listed as secrets — a committed
+//! `secrets/prod -> /elsewhere` must not redirect where a secret lands or what `rekey` reads.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -249,7 +254,7 @@ impl Vault {
     /// Returns an error if `name` is invalid or the file cannot be written.
     pub(crate) fn write_secret(&self, name: &str, blob: &[u8]) -> Result<()> {
         validate_name(name)?;
-        write_atomic(&self.secret_path(name), blob)
+        write_atomic(&self.root, &self.secret_path(name), blob)
     }
 
     /// Writes the encrypted description blob for `name` (atomic, like [`Self::write_secret`]).
@@ -261,7 +266,7 @@ impl Vault {
     /// Returns an error if `name` is invalid or the file cannot be written.
     pub(crate) fn write_description(&self, name: &str, blob: &[u8]) -> Result<()> {
         validate_name(name)?;
-        write_atomic(&self.desc_path(name), blob)
+        write_atomic(&self.root, &self.desc_path(name), blob)
     }
 
     /// Reads the encrypted description blob for `name`, or `None` if the secret has no
@@ -344,7 +349,11 @@ impl Vault {
     pub(crate) fn vault_id(&self) -> Result<String> {
         let path = self.sshare_dir().join(VAULT_ID_FILE);
         match fs::read_to_string(&path) {
-            Ok(s) => Ok(s.trim().to_owned()),
+            Ok(s) => {
+                let id = s.trim().to_owned();
+                validate_vault_id(&id).with_context(|| format!("cannot use {}", path.display()))?;
+                Ok(id)
+            }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 let id = random_id()?;
                 fs::write(&path, format!("{id}\n"))
@@ -397,11 +406,14 @@ impl Vault {
     }
 }
 
-/// Atomically writes `blob` to `path`, creating parent directories as needed.
+/// Atomically writes `blob` to `path` (which must lie under `root`), creating parent
+/// directories as needed.
 ///
 /// The blob is written to a temporary file in the same directory and then renamed over the
-/// target, so a reader (or an interrupted run) never observes a half-written file.
-fn write_atomic(path: &Path, blob: &[u8]) -> Result<()> {
+/// target, so a reader (or an interrupted run) never observes a half-written file. The write
+/// refuses to go through any symlink below `root` — see [`reject_symlinks_under`].
+fn write_atomic(root: &Path, path: &Path, blob: &[u8]) -> Result<()> {
+    reject_symlinks_under(root, path)?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -412,6 +424,44 @@ fn write_atomic(path: &Path, blob: &[u8]) -> Result<()> {
     if let Err(e) = fs::rename(&tmp, path) {
         let _ = fs::remove_file(&tmp);
         return Err(e).with_context(|| format!("cannot write {}", path.display()));
+    }
+    Ok(())
+}
+
+/// Refuses to write through a symlink anywhere between `root` and `path` (inclusive).
+///
+/// Vault contents come from git, so a committer can plant a symlink such as
+/// `secrets/prod -> /somewhere/else`; following it would put a secret outside the vault —
+/// and silently outside the repo. Lexical name validation cannot see that, only the
+/// filesystem can, so every component that already exists below the root is inspected.
+fn reject_symlinks_under(root: &Path, path: &Path) -> Result<()> {
+    let relative = path
+        .strip_prefix(root)
+        .map_err(|_| anyhow!("internal error: {} is outside the vault", path.display()))?;
+    let mut current = root.to_path_buf();
+    for component in relative.components() {
+        current.push(component);
+        match fs::symlink_metadata(&current) {
+            Ok(meta) if meta.file_type().is_symlink() => bail!(
+                "refusing to write through symlink {} — remove it from the vault first",
+                current.display()
+            ),
+            Ok(_) => {}
+            // Nothing below this point exists yet, so there is nothing left to inspect.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => break,
+            Err(e) => {
+                return Err(e).with_context(|| format!("cannot inspect {}", current.display()));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Checks a vault id is one printable token: it is embedded in the signed member set and in
+/// every encrypted payload header, where whitespace or control characters would corrupt them.
+fn validate_vault_id(id: &str) -> Result<()> {
+    if id.is_empty() || !id.bytes().all(|b| b.is_ascii_graphic()) {
+        bail!("corrupt vault id — it must be a single printable token");
     }
     Ok(())
 }
@@ -437,8 +487,17 @@ fn collect_secrets(base: &Path, dir: &Path, out: &mut Vec<String>) -> Result<()>
         Err(e) => return Err(e).with_context(|| format!("cannot read {}", dir.display())),
     };
     for entry in entries {
-        let path = entry?.path();
-        if path.is_dir() {
+        let entry = entry?;
+        let path = entry.path();
+        let file_type = entry
+            .file_type()
+            .with_context(|| format!("cannot inspect {}", path.display()))?;
+        // `file_type()` does not follow symlinks. A committed symlink could point anywhere on
+        // the reader's disk; whatever it resolves to is not this vault's secret.
+        if file_type.is_symlink() {
+            continue;
+        }
+        if file_type.is_dir() {
             collect_secrets(base, &path, out)?;
         } else if path.extension().and_then(|s| s.to_str()) == Some(SECRET_EXT) {
             let relative = path.strip_prefix(base).unwrap_or(&path).with_extension("");
@@ -614,5 +673,52 @@ mod tests {
         assert!(validate_name("/abs").is_err());
         assert!(validate_name("a/../b").is_err());
         assert!(validate_name("ok/nested-name").is_ok());
+    }
+
+    #[test]
+    fn corrupt_vault_id_is_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = Vault::init(dir.path()).unwrap();
+        assert_eq!(vault.vault_id().unwrap().len(), 32);
+        std::fs::write(dir.path().join(".sshare/id"), "two words\n").unwrap();
+        assert!(vault.vault_id().is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn refuses_to_write_through_a_symlinked_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = Vault::init(dir.path()).unwrap();
+        let outside = dir.path().join("outside");
+        std::fs::create_dir(&outside).unwrap();
+        // What a committer could plant: secrets/prod -> somewhere outside the vault.
+        std::os::unix::fs::symlink(&outside, dir.path().join("secrets/prod")).unwrap();
+
+        let msg = vault
+            .write_secret("prod/token", b"cipher")
+            .unwrap_err()
+            .to_string();
+        assert!(msg.contains("symlink"), "got: {msg}");
+        assert!(
+            std::fs::read_dir(&outside).unwrap().next().is_none(),
+            "the secret escaped the vault"
+        );
+
+        // Nor are blobs behind the symlink ever treated as this vault's secrets.
+        std::fs::write(outside.join("foreign.age"), b"x").unwrap();
+        assert!(vault.secret_names().unwrap().is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn refuses_to_replace_a_symlinked_secret_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = Vault::init(dir.path()).unwrap();
+        let victim = dir.path().join("victim.age");
+        std::fs::write(&victim, b"keep").unwrap();
+        std::os::unix::fs::symlink(&victim, dir.path().join("secrets/link.age")).unwrap();
+
+        assert!(vault.write_secret("link", b"cipher").is_err());
+        assert_eq!(std::fs::read(&victim).unwrap(), b"keep");
     }
 }

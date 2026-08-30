@@ -109,11 +109,12 @@ export DB_PASSWORD="$(sshare get db-prod)"
 | `sshare member add <name> [--key <path\|->] [--identity <path>]` | Register a member's SSH public key and re-sign the member list. |
 | `sshare member ls` | List members. |
 | `sshare member rm <name> [--identity <path>]` | Remove a member and re-sign (then run `rekey`). |
+| `sshare member sign [--yes] [--identity <path>]` | Review and explicitly sign the member list as-is (for a vault that predates signing or lost its signature). |
 | `sshare add <name> [--file <path>\|--value <v>] [--description <text>]` | Store/update a secret. Prompts (hidden) when interactive; otherwise reads stdin / `--file` / `--value`. `--description` stores an encrypted note (`--description ""` clears it). |
 | `sshare get <name> [--identity <path>]` | Decrypt a secret to stdout. |
 | `sshare ls [--descriptions] [--identity <path>]` | List stored secrets; with `--descriptions` also decrypt and show each note. |
 | `sshare rm <name>` | Remove a stored secret (and its description). |
-| `sshare rekey [--identity <path>]` | Re-encrypt all secrets (and descriptions) for the current members. |
+| `sshare rekey [--migrate-legacy] [--identity <path>]` | Re-encrypt all secrets (and descriptions) for the current members. `--migrate-legacy` also upgrades pre-0.7 blobs after you've checked the names it lists. |
 
 Any command that operates on a vault also accepts a global **`--vault <name>`** (or the
 `SSHARE_VAULT` env var) to target a connected vault from anywhere — otherwise sshare uses
@@ -150,8 +151,17 @@ sshare trust accept                          # pin it (verify the fingerprint ou
 ```
 
 If the member list is changed without a valid signature by the pinned authority, `add` and
-`rekey` refuse with an error. See
+`rekey` refuse with an error — and so do `member add`/`member rm`, which verify the signed
+list *before* changing it (re-signing whatever is on disk would launder an injected key).
+The only way to sign an unverified list is the explicit `sshare member sign`, which shows
+every member's key fingerprint and asks you to confirm. See
 [docs/design-docs/signed-members-list.md](docs/design-docs/signed-members-list.md).
+
+Secrets are also **bound to their vault**: every blob carries the vault id inside the
+encrypted payload, so ciphertext copied in from another vault is refused by `get` and
+`rekey` instead of being re-encrypted to this vault's members. Blobs written before 0.7 have
+no binding; `rekey` lists them and needs `--migrate-legacy` to upgrade them. See
+[docs/design-docs/vault-bound-ciphertext.md](docs/design-docs/vault-bound-ciphertext.md).
 
 ## Git integration
 

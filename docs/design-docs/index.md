@@ -9,6 +9,7 @@ Design decisions and the beliefs behind them.
 | Signed Members List (TOFU) | Implemented | 2026-06-23 | [signed-members-list.md](signed-members-list.md) |
 | Git Integration (autocommit + passthrough) | Implemented | 2026-06-23 | [git-integration.md](git-integration.md) |
 | Encrypted Secret Descriptions | Implemented | 2026-06-25 | [descriptions.md](descriptions.md) |
+| Vault-Bound Ciphertext (`rekey` is not a decryption oracle) | Implemented | 2026-08-29 | [vault-bound-ciphertext.md](vault-bound-ciphertext.md) |
 
 ## Decisions captured elsewhere (and where)
 

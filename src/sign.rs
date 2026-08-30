@@ -60,6 +60,20 @@ pub(crate) fn fingerprint_of(identity_path: &Path) -> Result<String> {
     Ok(key.public_key().fingerprint(HashAlg::Sha256).to_string())
 }
 
+/// Returns the SHA-256 fingerprint of an SSH public key line (`ssh-ed25519 AAAA… comment`).
+///
+/// Used to show a maintainer *which* keys they are about to sign, in the same form
+/// `ssh-keygen -l` prints, so they can be checked against what a teammate sent.
+///
+/// # Errors
+///
+/// Returns an error if the line is not a parseable OpenSSH public key.
+pub(crate) fn pubkey_fingerprint(pubkey_line: &str) -> Result<String> {
+    let key = PublicKey::from_openssh(pubkey_line.trim())
+        .map_err(|e| anyhow!("not a valid SSH public key ({e})"))?;
+    Ok(key.fingerprint(HashAlg::Sha256).to_string())
+}
+
 /// Reads an SSH private key, decrypting it with a terminal passphrase prompt if needed.
 fn load_private_key(identity_path: &Path) -> Result<PrivateKey> {
     let key = PrivateKey::read_openssh_file(identity_path)
@@ -78,7 +92,7 @@ fn load_private_key(identity_path: &Path) -> Result<PrivateKey> {
 
 #[cfg(test)]
 mod tests {
-    use super::{fingerprint_of, sign, verify};
+    use super::{fingerprint_of, pubkey_fingerprint, sign, verify};
     use crate::test_keys;
     use std::io::Write;
     use std::path::PathBuf;
@@ -122,5 +136,15 @@ mod tests {
     #[test]
     fn garbage_signature_fails() {
         assert!(verify(b"x", "not a signature").is_err());
+    }
+
+    #[test]
+    fn pubkey_fingerprint_matches_the_private_key_fingerprint() {
+        let (_d, key) = key_file(test_keys::ALICE_KEY);
+        assert_eq!(
+            pubkey_fingerprint(test_keys::ALICE_PUB).unwrap(),
+            fingerprint_of(&key).unwrap()
+        );
+        assert!(pubkey_fingerprint("not a key").is_err());
     }
 }
