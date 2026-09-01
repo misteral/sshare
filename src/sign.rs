@@ -12,20 +12,51 @@ use ssh_key::{HashAlg, LineEnding, PrivateKey, PublicKey, SshSig};
 /// SSHSIG namespace — domain-separates these from any other SSH signature the key makes.
 const NAMESPACE: &str = "sshare-members";
 
-/// Signs `message` with the SSH private key at `identity_path`, returning an armored
-/// (`-----BEGIN SSH SIGNATURE-----`) detached signature. Prompts on the terminal if the
-/// key is passphrase-protected.
+/// A loaded SSH private key — passphrase-decrypted if needed — ready to sign the member
+/// list. Callers load it *before* mutating the vault so a passphrase mistype fails early,
+/// leaving no changed member set paired with a stale signature.
+pub(crate) struct Signer {
+    key: PrivateKey,
+}
+
+impl std::fmt::Debug for Signer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Never render key material; the fingerprint is the safe identifier.
+        write!(
+            f,
+            "Signer({})",
+            self.key.public_key().fingerprint(HashAlg::Sha256)
+        )
+    }
+}
+
+impl Signer {
+    /// Signs `message`, returning an armored (`-----BEGIN SSH SIGNATURE-----`) detached
+    /// SSHSIG.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if signing or encoding the signature fails.
+    pub(crate) fn sign(&self, message: &[u8]) -> Result<String> {
+        let sig = self
+            .key
+            .sign(NAMESPACE, HashAlg::Sha512, message)
+            .map_err(|e| anyhow!("failed to sign members list ({e})"))?;
+        sig.to_pem(LineEnding::LF)
+            .map_err(|e| anyhow!("failed to encode signature ({e})"))
+    }
+}
+
+/// Loads (and, if the key is passphrase-protected, decrypts via a terminal prompt) the SSH
+/// private key at `identity_path`, ready to sign with.
 ///
 /// # Errors
 ///
-/// Returns an error if the key cannot be read, parsed, or decrypted, or signing fails.
-pub(crate) fn sign(message: &[u8], identity_path: &Path) -> Result<String> {
-    let key = load_private_key(identity_path)?;
-    let sig = key
-        .sign(NAMESPACE, HashAlg::Sha512, message)
-        .map_err(|e| anyhow!("failed to sign members list ({e})"))?;
-    sig.to_pem(LineEnding::LF)
-        .map_err(|e| anyhow!("failed to encode signature ({e})"))
+/// Returns an error if the key cannot be read, parsed, or decrypted.
+pub(crate) fn load_signer(identity_path: &Path) -> Result<Signer> {
+    Ok(Signer {
+        key: load_private_key(identity_path)?,
+    })
 }
 
 /// Verifies an armored SSHSIG over `message` and returns the signer's SHA-256 fingerprint
@@ -92,7 +123,7 @@ fn load_private_key(identity_path: &Path) -> Result<PrivateKey> {
 
 #[cfg(test)]
 mod tests {
-    use super::{fingerprint_of, pubkey_fingerprint, sign, verify};
+    use super::{fingerprint_of, load_signer, pubkey_fingerprint, verify};
     use crate::test_keys;
     use std::io::Write;
     use std::path::PathBuf;
@@ -110,7 +141,8 @@ mod tests {
     #[test]
     fn sign_verify_roundtrip_and_fingerprint() {
         let (_d, key) = key_file(test_keys::ALICE_KEY);
-        let sig = sign(b"the members", &key).unwrap();
+        let signer = load_signer(&key).unwrap();
+        let sig = signer.sign(b"the members").unwrap();
         let fp = verify(b"the members", &sig).unwrap();
         assert!(fp.starts_with("SHA256:"), "got {fp}");
         assert_eq!(fp, fingerprint_of(&key).unwrap());
@@ -119,7 +151,7 @@ mod tests {
     #[test]
     fn tampered_message_fails() {
         let (_d, key) = key_file(test_keys::ALICE_KEY);
-        let sig = sign(b"the members", &key).unwrap();
+        let sig = load_signer(&key).unwrap().sign(b"the members").unwrap();
         assert!(verify(b"the MEMBERS", &sig).is_err());
     }
 

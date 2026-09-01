@@ -30,6 +30,31 @@ Both issues below were found in the project's first security review (2026-08-28)
   are never listed — a committed `secrets/prod -> /elsewhere` can no longer redirect where a
   secret lands or what `rekey` reads.
 
+A follow-up code review of the fixes above closed the adjacent gaps they exposed (the
+signed-members / vault-binding trust root leans on file, name, and encoding handling a git
+committer controls):
+
+- **The signed member encoding is now unambiguous.** Member `.pub` files are read only if
+  they are plain files (not symlinks, not directories) with an `add`-legal name and a key
+  free of embedded NUL/newline bytes — so one signature can no longer cover two different
+  parsed member sets, a symlinked key can't diverge the canonical bytes per machine, and a
+  directory named `*.pub` can't brick every membership command.
+- **Reads are symlink-safe too** (not just writes): `get`/`rekey` refuse a secret or
+  description reached through a committed symlink, so `rekey` can't abort mid-loop after
+  re-encrypting only some secrets (which would leave a removed member still able to read the
+  rest). `members.sig` and member `.pub` writes also go through the symlink-guarded atomic
+  writer.
+- **Untrusted text is escaped before it reaches the terminal** — a foreign vault id in an
+  error, a committed secret/member name — so a planted name or blob can't inject ANSI escape
+  sequences or forge lines in a review listing.
+- **`member sign` won't hand authority to whoever runs it**: on a machine with no pin yet it
+  refuses to re-sign an already-validly-signed list with an unrelated key (directing you to
+  `trust accept` the real authority), and it states plainly when signing will TOFU-pin you.
+- **A corrupt/missing `.sshare/id` no longer mints a fresh one on read** (which would diverge
+  clones) and no longer blocks reading legacy secrets; the signing key is loaded before the
+  member set is mutated, so a passphrase mistype can't strand a changed set with a stale
+  signature; and `rekey --migrate-legacy` now lists every blob it binds.
+
 ### Added
 
 - `sshare member sign [--yes] [--identity <path>]` — review and explicitly sign the member

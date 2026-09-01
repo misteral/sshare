@@ -315,9 +315,9 @@ fn cmd_trust_accept(selector: Option<&str>, fingerprint: Option<String>) -> Resu
 /// membership right now.
 #[derive(Debug)]
 struct MembershipAuthority {
-    /// The maintainer's SSH private key, used to sign the updated member list.
-    identity: PathBuf,
-    /// Its SHA-256 fingerprint — what gets pinned.
+    /// The maintainer's loaded (passphrase-decrypted) signing key.
+    signer: sign::Signer,
+    /// Its SHA-256 fingerprint — what gets pinned and printed.
     fingerprint: String,
 }
 
@@ -347,8 +347,12 @@ fn authorize_membership_change(
     }
     let vault_id = vault.vault_id()?;
     require_maintainer(TrustStore::load()?.pinned(&vault_id), &fingerprint)?;
+    // Load (and decrypt) the signing key only after authorization succeeds, but before the
+    // caller mutates the member set — so a passphrase mistype fails here, never after the
+    // set has changed with only the re-sign left to strand a stale signature.
+    let signer = sign::load_signer(&identity)?;
     Ok(MembershipAuthority {
-        identity,
+        signer,
         fingerprint,
     })
 }
@@ -363,11 +367,13 @@ fn require_maintainer(pinned: Option<&str>, fingerprint: &str) -> Result<()> {
     }
 }
 
-/// Signs the current member set with the authority's key, and pins that key on this machine
-/// if no authority is pinned yet (the first signer establishes the authority).
-fn sign_members(vault: &Vault, auth: &MembershipAuthority) -> Result<()> {
-    let canonical = vault.canonical_members()?;
-    let sig = sign::sign(&canonical, &auth.identity)?;
+/// Signs `canonical` — the exact member bytes the caller just verified or displayed — with
+/// the authority's key, and pins that key on this machine if none is pinned yet (the first
+/// signer establishes the authority). Taking the bytes as an argument (rather than re-reading
+/// them here) keeps signing bound to what was reviewed, closing the window between a
+/// confirmation prompt and the write.
+fn sign_members(vault: &Vault, auth: &MembershipAuthority, canonical: &[u8]) -> Result<()> {
+    let sig = auth.signer.sign(canonical)?;
     vault.write_members_sig(&sig)?;
     let vault_id = vault.vault_id()?;
     let mut trust = TrustStore::load()?;
@@ -542,7 +548,8 @@ fn cmd_member_add(
         None => read_pubkey_file(&default_pubkey()?)?,
     };
     vault.add_member(name, pubkey.trim())?;
-    sign_members(&vault, &auth)?;
+    let canonical = vault.canonical_members()?;
+    sign_members(&vault, &auth, &canonical)?;
     maybe_autocommit(&vault, &format!("sshare: add member {name}"));
     let members = vault.members()?;
     println!(
@@ -573,7 +580,8 @@ fn cmd_member_rm(selector: Option<&str>, name: &str, identity: Option<&Path>) ->
     let vault = resolve_vault(selector)?;
     let auth = authorize_membership_change(&vault, identity)?;
     vault.remove_member(name)?;
-    sign_members(&vault, &auth)?;
+    let canonical = vault.canonical_members()?;
+    sign_members(&vault, &auth, &canonical)?;
     maybe_autocommit(&vault, &format!("sshare: remove member {name}"));
     let members = vault.members()?;
     println!(
@@ -595,16 +603,31 @@ fn cmd_member_sign(selector: Option<&str>, identity: Option<&Path>, yes: bool) -
     let identity = resolve_identity(identity.map(Path::to_path_buf))?;
     let fingerprint = sign::fingerprint_of(&identity)?;
     let vault_id = vault.vault_id()?;
-    require_maintainer(TrustStore::load()?.pinned(&vault_id), &fingerprint)?;
+    let pinned = TrustStore::load()?.pinned(&vault_id).map(str::to_owned);
+    require_maintainer(pinned.as_deref(), &fingerprint)?;
     let members = vault.members()?;
     if members.is_empty() {
         bail!("no members to sign — add one with 'sshare member add'");
     }
-    // Say what the current signature covers, so a tampered list is visible before signing.
+    // Capture the exact bytes we verify, show, and sign, so a concurrent fetch during the
+    // confirmation prompt cannot swap in a set the maintainer never reviewed.
+    let canonical = vault.canonical_members()?;
     match vault.read_members_sig()? {
         None => println!("The member list is not signed yet."),
-        Some(sig) => match sign::verify(&vault.canonical_members()?, &sig) {
-            Ok(signer) => println!("The member list is currently signed by {signer}."),
+        Some(sig) => match sign::verify(&canonical, &sig) {
+            Ok(signer) => {
+                // Already validly signed. `member sign` recovers an unsigned or invalid
+                // list; it must not let an unrelated key re-sign a good one and — on a
+                // machine with no pin yet — hand authority to whoever runs it.
+                if pinned.is_none() && signer != fingerprint {
+                    bail!(
+                        "this member list is already validly signed by {signer}.\n\
+                         To adopt that authority on this machine, run \
+                         'sshare trust accept {signer}'; to change it, sign with that key."
+                    );
+                }
+                println!("The member list is currently signed by {signer}.");
+            }
             Err(_) => println!(
                 "The current signature is INVALID — the member files changed since it was made."
             ),
@@ -615,14 +638,21 @@ fn cmd_member_sign(selector: Option<&str>, identity: Option<&Path>, yes: bool) -
         members.len()
     );
     print_member_set(&members)?;
+    if pinned.is_none() {
+        println!(
+            "No authority is pinned here yet — signing pins {fingerprint} as this vault's \
+             authority on this machine (TOFU); verify it out-of-band."
+        );
+    }
     if !yes {
         confirm("Sign this member list?")?;
     }
+    let signer = sign::load_signer(&identity)?;
     let auth = MembershipAuthority {
-        identity,
+        signer,
         fingerprint,
     };
-    sign_members(&vault, &auth)?;
+    sign_members(&vault, &auth, &canonical)?;
     maybe_autocommit(&vault, "sshare: sign member list");
     println!("Signed the member list as {}.", auth.fingerprint);
     Ok(())
@@ -672,13 +702,27 @@ fn cmd_add(
     Ok(())
 }
 
+/// The vault id for a read-only command. A missing or corrupt id must not block reading a
+/// legacy (unbound) secret — those carry no id — so we warn and fall back to an id that
+/// matches nothing, which still refuses any vault-bound blob. Encrypt paths keep the strict
+/// `vault.vault_id()?`, since they must bind to a real id.
+fn read_only_vault_id(vault: &Vault) -> String {
+    match vault.vault_id() {
+        Ok(id) => id,
+        Err(e) => {
+            eprintln!("warning: {e:#}");
+            String::new()
+        }
+    }
+}
+
 fn cmd_get(selector: Option<&str>, name: &str, identity: Option<PathBuf>) -> Result<()> {
     let vault = resolve_vault(selector)?;
     let blob = vault.read_secret(name)?;
     let identity = resolve_identity(identity)?;
-    // A pre-0.7 (unbound) blob still reads fine; only a blob bound to *another* vault is
+    // A legacy (unbound) blob still reads fine; only a blob bound to *another* vault is
     // refused — see `crypto::decrypt`.
-    let plaintext = crypto::decrypt(&blob, &vault.vault_id()?, &identity)?;
+    let plaintext = crypto::decrypt(&blob, &read_only_vault_id(&vault), &identity)?;
     std::io::stdout().write_all(&plaintext.bytes)?;
     Ok(())
 }
@@ -700,7 +744,7 @@ fn cmd_ls(selector: Option<&str>, descriptions: bool, identity: Option<&Path>) -
     // this feature) need no key, so `ls --descriptions` only asks for one once it hits a
     // description it must decrypt.
     let mut id: Option<PathBuf> = None;
-    let vault_id = vault.vault_id()?;
+    let vault_id = read_only_vault_id(&vault);
     for name in names {
         match vault.read_description(&name)? {
             None => println!("{name}"),
@@ -798,12 +842,17 @@ fn cmd_rekey(
     // of this vault's secrets, so it only happens after the operator has seen the names.
     if !legacy.is_empty() && !migrate_legacy {
         bail!(
-            "{} blob(s) carry no vault binding (written before 0.7, or not by sshare):\n  {}\n\
+            "{} blob(s) carry no vault binding (legacy — written before vault binding, or not \
+             by sshare):\n  {}\n\
              Re-encrypting them would make them this vault's secrets. If every name above is \
              one you expect here, re-run with --migrate-legacy. An unexpected name may be \
              ciphertext planted from another vault — remove it with 'sshare rm <name>' instead.",
             legacy.len(),
-            legacy.join("\n  ")
+            legacy
+                .iter()
+                .map(|n| crypto::sanitize_for_display(n))
+                .collect::<Vec<_>>()
+                .join("\n  ")
         );
     }
 
@@ -830,10 +879,16 @@ fn cmd_rekey(
         recipients.len()
     );
     if !legacy.is_empty() {
+        // Name every migrated blob: --migrate-legacy acts on whatever is unbound *now*, which
+        // may differ from an earlier review run (e.g. a git pull landed a planted blob in
+        // between), so the operator sees exactly what was bound in.
         println!(
-            "Migrated {} legacy blob(s) to the vault-bound format.",
+            "Migrated {} legacy blob(s) to the vault-bound format:",
             legacy.len()
         );
+        for name in &legacy {
+            println!("  {}", crypto::sanitize_for_display(name));
+        }
     }
     Ok(())
 }

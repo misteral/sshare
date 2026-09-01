@@ -16,10 +16,14 @@
 //! than beside the secret) so a description can never collide with a secret name, and so
 //! `secret_names` stays a plain walk of `secrets/`.
 //!
-//! Everything under the vault arrives via git, i.e. from other committers. Names are
-//! validated lexically (`validate_name`), and on top of that writes never follow a symlink
-//! inside the vault and symlinked entries are never listed as secrets — a committed
-//! `secrets/prod -> /elsewhere` must not redirect where a secret lands or what `rekey` reads.
+//! Everything under the vault arrives via git, i.e. from other committers, so file contents
+//! are treated as hostile. Names are validated lexically (`validate_name`); on top of that
+//! neither reads nor writes follow a symlink inside the vault, symlinked or oddly-named
+//! entries are never listed or counted (as secrets or as members), and the signed member
+//! set only ever contains well-formed `name\0pubkey` pairs — a committed
+//! `secrets/prod -> /elsewhere`, a symlinked `members/x.pub`, or a key with an embedded
+//! newline must not redirect a write, be read through, diverge the canonical bytes, or
+//! reach the terminal unescaped.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -150,20 +154,45 @@ impl Vault {
 
         let mut members = Vec::new();
         for entry in entries {
-            let path = entry?.path();
+            let entry = entry?;
+            let path = entry.path();
             if path.extension().and_then(|s| s.to_str()) != Some(PUBKEY_EXT) {
                 continue;
             }
-            let name = path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or_default()
-                .to_owned();
+            // The member set is signed and printed for review, and every committer can drop
+            // files here, so only well-formed plain files count. `file_type()` does not
+            // follow symlinks: a symlinked `*.pub` could resolve differently per machine
+            // (diverging the canonical bytes), and a directory named `*.pub` would raise a
+            // read error that bricks every membership command — skip both.
+            let file_type = entry
+                .file_type()
+                .with_context(|| format!("cannot inspect {}", path.display()))?;
+            if !file_type.is_file() {
+                continue;
+            }
+            // The name is the signed identifier and is printed for review; hold it to the
+            // same charset `add_member` enforces, so a committed odd filename can neither
+            // diverge the canonical encoding nor inject terminal escapes into the listing.
+            let Some(name) = path.file_stem().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            if validate_component(name).is_err() {
+                continue;
+            }
             let pubkey = fs::read_to_string(&path)
                 .with_context(|| format!("cannot read {}", path.display()))?
                 .trim()
                 .to_owned();
-            members.push(Member { name, pubkey });
+            // canonical_members joins entries as `name\0pubkey\n`; a NUL or newline inside
+            // the pubkey would make that ambiguous — one signature covering two different
+            // parsed member sets — so a key carrying either byte is not a member.
+            if pubkey.bytes().any(|b| b == 0 || b == b'\n' || b == b'\r') {
+                continue;
+            }
+            members.push(Member {
+                name: name.to_owned(),
+                pubkey,
+            });
         }
         members.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(members)
@@ -198,9 +227,9 @@ impl Vault {
         let dir = self.members_dir();
         fs::create_dir_all(&dir)?;
         let path = dir.join(format!("{name}.{PUBKEY_EXT}"));
-        fs::write(&path, format!("{}\n", pubkey.trim()))
-            .with_context(|| format!("cannot write {}", path.display()))?;
-        Ok(())
+        // Route through the atomic writer so this write, like secret writes, refuses to
+        // follow a committed symlink out of the vault.
+        write_atomic(&self.root, &path, format!("{}\n", pubkey.trim()).as_bytes())
     }
 
     /// Removes a member by name.
@@ -278,6 +307,9 @@ impl Vault {
     pub(crate) fn read_description(&self, name: &str) -> Result<Option<Vec<u8>>> {
         validate_name(name)?;
         let path = self.desc_path(name);
+        // Symmetric with writes: never read a description *through* a committed symlink, so
+        // rekey's phase 1 aborts on one before phase 2 has re-encrypted any earlier item.
+        reject_symlinks_under(&self.root, &path)?;
         match fs::read(&path) {
             Ok(blob) => Ok(Some(blob)),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
@@ -308,6 +340,8 @@ impl Vault {
     pub(crate) fn read_secret(&self, name: &str) -> Result<Vec<u8>> {
         validate_name(name)?;
         let path = self.secret_path(name);
+        // Symmetric with writes: refuse a secret reached through a committed symlink.
+        reject_symlinks_under(&self.root, &path)?;
         if !path.exists() {
             bail!("no such secret '{name}'");
         }
@@ -341,27 +375,32 @@ impl Vault {
         self.root.join(VAULT_DIR)
     }
 
-    /// Returns the vault's stable id (from `.sshare/id`), creating a random one if absent.
+    /// Returns the vault's stable id, read from `.sshare/id` (written once at `init`).
+    ///
+    /// Never mints one on read: a missing id means corruption or a pre-signing vault, and
+    /// silently minting a fresh random id would make each clone diverge (every bound blob
+    /// then reads as "another vault" and the signed member set stops matching).
     ///
     /// # Errors
     ///
-    /// Returns an error if the id file cannot be read or created.
+    /// Returns an error if the id file is missing, unreadable, or not a single printable
+    /// token.
     pub(crate) fn vault_id(&self) -> Result<String> {
         let path = self.sshare_dir().join(VAULT_ID_FILE);
-        match fs::read_to_string(&path) {
-            Ok(s) => {
-                let id = s.trim().to_owned();
-                validate_vault_id(&id).with_context(|| format!("cannot use {}", path.display()))?;
-                Ok(id)
+        let contents = fs::read_to_string(&path).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                anyhow!(
+                    "{} is missing — this vault is corrupt or predates vault ids; \
+                     restore it from git history",
+                    path.display()
+                )
+            } else {
+                anyhow::Error::new(e).context(format!("cannot read {}", path.display()))
             }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                let id = random_id()?;
-                fs::write(&path, format!("{id}\n"))
-                    .with_context(|| format!("cannot write {}", path.display()))?;
-                Ok(id)
-            }
-            Err(e) => Err(e).with_context(|| format!("cannot read {}", path.display())),
-        }
+        })?;
+        let id = contents.trim().to_owned();
+        validate_vault_id(&id).with_context(|| format!("cannot use {}", path.display()))?;
+        Ok(id)
     }
 
     /// The canonical bytes of the member set that get signed: a versioned header, the vault
@@ -402,7 +441,9 @@ impl Vault {
     /// Returns an error if the file cannot be written.
     pub(crate) fn write_members_sig(&self, armored: &str) -> Result<()> {
         let path = self.sshare_dir().join(MEMBERS_SIG_FILE);
-        fs::write(&path, armored).with_context(|| format!("cannot write {}", path.display()))
+        // Atomic + symlink-guarded: a committer must not be able to redirect this write
+        // through a symlinked members.sig to clobber a file outside the vault.
+        write_atomic(&self.root, &path, armored.as_bytes())
     }
 }
 
@@ -502,7 +543,19 @@ fn collect_secrets(base: &Path, dir: &Path, out: &mut Vec<String>) -> Result<()>
         } else if path.extension().and_then(|s| s.to_str()) == Some(SECRET_EXT) {
             let relative = path.strip_prefix(base).unwrap_or(&path).with_extension("");
             if let Some(name) = relative.to_str() {
-                out.push(name.to_owned());
+                // Only enumerate names a real `add` could have produced. A committed blob
+                // with an out-of-charset name (or terminal-escape bytes) must not wedge
+                // rekey with 'invalid secret name' before its legacy-review gate, nor reach
+                // the terminal unescaped — report it and skip.
+                if validate_name(name).is_ok() {
+                    out.push(name.to_owned());
+                } else {
+                    eprintln!(
+                        "warning: ignoring '{}' under secrets/ — not a valid secret name; \
+                         remove it from the repo if unexpected",
+                        crypto::sanitize_for_display(name)
+                    );
+                }
             }
         }
     }
@@ -720,5 +773,89 @@ mod tests {
 
         assert!(vault.write_secret("link", b"cipher").is_err());
         assert_eq!(std::fs::read(&victim).unwrap(), b"keep");
+    }
+
+    #[test]
+    fn missing_vault_id_errors_instead_of_minting() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = Vault::init(dir.path()).unwrap();
+        let id_path = dir.path().join(".sshare/id");
+        std::fs::remove_file(&id_path).unwrap();
+        // A read must not silently write a fresh id (which would diverge across clones).
+        assert!(vault.vault_id().is_err());
+        assert!(!id_path.exists(), "vault_id minted a new id on read");
+    }
+
+    #[test]
+    fn members_ignores_odd_and_ambiguous_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = Vault::init(dir.path()).unwrap();
+        let members = dir.path().join(".sshare/members");
+        vault.add_member("alice", test_keys::ALICE_PUB).unwrap();
+        // An out-of-charset name, and a key whose bytes carry a newline (which would make
+        // the signed `name\0pubkey\n` encoding ambiguous) — both must be skipped.
+        std::fs::write(members.join("bad name.pub"), test_keys::MALLORY_PUB).unwrap();
+        std::fs::write(
+            members.join("sneaky.pub"),
+            format!(
+                "{}\nmallory\0{}",
+                test_keys::ALICE_PUB,
+                test_keys::MALLORY_PUB
+            ),
+        )
+        .unwrap();
+        // A directory named like a member file must not raise an error either.
+        std::fs::create_dir(members.join("adir.pub")).unwrap();
+
+        let names: Vec<_> = vault
+            .members()
+            .unwrap()
+            .into_iter()
+            .map(|m| m.name)
+            .collect();
+        assert_eq!(names, vec!["alice".to_owned()]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn members_ignores_symlinked_pub_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = Vault::init(dir.path()).unwrap();
+        vault.add_member("alice", test_keys::ALICE_PUB).unwrap();
+        let outside = dir.path().join("evil");
+        std::fs::write(&outside, test_keys::MALLORY_PUB).unwrap();
+        std::os::unix::fs::symlink(&outside, dir.path().join(".sshare/members/evil.pub")).unwrap();
+
+        let names: Vec<_> = vault
+            .members()
+            .unwrap()
+            .into_iter()
+            .map(|m| m.name)
+            .collect();
+        assert_eq!(names, vec!["alice".to_owned()]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_refuses_a_symlinked_description() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = Vault::init(dir.path()).unwrap();
+        std::fs::create_dir_all(dir.path().join(".sshare/descriptions")).unwrap();
+        let outside = dir.path().join("secret-note");
+        std::fs::write(&outside, b"leak me").unwrap();
+        std::os::unix::fs::symlink(&outside, dir.path().join(".sshare/descriptions/db.age"))
+            .unwrap();
+        assert!(vault.read_description("db").is_err());
+    }
+
+    #[test]
+    fn secret_names_skips_invalid_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = Vault::init(dir.path()).unwrap();
+        vault.write_secret("ok", b"x").unwrap();
+        // A committed blob with a name no `add` could produce (a space) must be skipped, not
+        // wedge enumeration.
+        std::fs::write(dir.path().join("secrets/bad name.age"), b"y").unwrap();
+        assert_eq!(vault.secret_names().unwrap(), vec!["ok".to_owned()]);
     }
 }

@@ -32,12 +32,24 @@ by re-encryption — never as a role/flag gate that could be bypassed by editing
   bad key fails immediately rather than silently at encrypt time.
 - **Ciphertext is parsed by `age`** on `get`/`rekey`; a non-age blob produces a clear
   error, never a panic.
-- **Writes never follow a symlink inside the vault** (`write_atomic` inspects every
-  component below the root with `symlink_metadata`), and **symlinked entries under
-  `secrets/` are never listed**. Lexical name validation cannot see a committed
-  `secrets/prod -> /elsewhere`; only the filesystem can, so it is checked at write time.
+- **Neither reads nor writes follow a symlink inside the vault** (`reject_symlinks_under`
+  inspects every component below the root with `symlink_metadata`), and **symlinked entries
+  are never listed or counted**. Lexical name validation cannot see a committed
+  `secrets/prod -> /elsewhere` or a symlinked `members/x.pub`; only the filesystem can, so it
+  is checked on every read and write. This keeps `rekey`'s "decrypt everything before writing
+  anything" atomicity honest — a symlinked blob aborts the run before any secret is rewritten.
+- **The signed member encoding is unambiguous.** A `members/<name>.pub` counts only if it is
+  a plain file with an `add`-legal name and a key carrying no NUL or newline byte; otherwise
+  it is skipped. Without this, `canonical_members` (`name\0pubkey\n`, no escaping) would be
+  non-injective — one signature could cover two different parsed member sets — and a symlink
+  or odd filename could diverge the bytes per machine or brick every membership command.
+- **Untrusted text is escaped before printing** (`crypto::sanitize_for_display`): a foreign
+  vault id in an error, a committed secret or member name in a listing. A planted name or
+  blob therefore cannot inject terminal escape sequences or forge rows in the `member sign`
+  review list.
 - **`.sshare/id` must be one printable token** — it is embedded in the signed member set and
-  in every encrypted payload header.
+  in every encrypted payload header. It is read-only: a missing id is never silently minted
+  (that would diverge clones), and a corrupt id does not block reading a legacy secret.
 
 ## Vault-bound ciphertext (`rekey` is not a decryption oracle)
 

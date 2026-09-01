@@ -31,6 +31,23 @@ pub(crate) fn parse_recipient(pubkey: &str) -> Result<age::ssh::Recipient> {
         .map_err(|e| anyhow!("unsupported or invalid SSH public key ({e:?})"))
 }
 
+/// Escapes control characters (newlines, carriage returns, ESC, …) so untrusted text — a
+/// foreign vault id, a committed secret or member name — cannot inject terminal escape
+/// sequences or forge extra lines when printed. Printable characters pass through unchanged.
+///
+/// Lives here (the lowest layer) so both `vault.rs` and `main.rs` can reuse the one copy.
+pub(crate) fn sanitize_for_display(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        if c.is_control() {
+            out.extend(c.escape_default());
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
 /// Start of a vault-bound payload: `sshare/1\n<vault-id>\n<secret bytes>`.
 const BOUND_MAGIC: &[u8] = b"sshare/1\n";
 
@@ -129,11 +146,19 @@ pub(crate) fn decrypt(
     };
     let (found_id, bytes) = (&rest[..newline], &rest[newline + 1..]);
     if found_id != vault_id.as_bytes() {
+        // `found_id` is attacker-controlled decrypted plaintext, so cap it and escape control
+        // bytes before it reaches the terminal (a real id is 32 hex chars).
+        let head = &found_id[..found_id.len().min(64)];
+        let ellipsis = if found_id.len() > head.len() {
+            "…"
+        } else {
+            ""
+        };
         bail!(
-            "this blob is bound to a different vault ({}) — it was not encrypted here.\n\
+            "this blob is bound to a different vault ({}{ellipsis}) — it was not encrypted here.\n\
              If it was planted, remove it ('sshare rm <name>'); if this vault's id changed \
              legitimately, restore .sshare/id.",
-            String::from_utf8_lossy(found_id)
+            sanitize_for_display(&String::from_utf8_lossy(head))
         );
     }
     Ok(Plaintext {

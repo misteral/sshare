@@ -789,6 +789,46 @@ fn add_refuses_to_write_through_a_committed_symlink() {
     );
 }
 
+#[test]
+fn member_sign_wont_hijack_an_already_signed_vault_on_a_fresh_machine() {
+    let f = Fixture::setup(); // validly signed by alice
+    let alice = f.key.to_str().unwrap();
+    // A fresh machine = a config home with no pins yet.
+    let cfg2 = f.dir.path().join("cfg2");
+    let mkey = f.root.join("mallory.key");
+    std::fs::write(&mkey, MALLORY_KEY).unwrap();
+
+    // A non-authority who freshly cloned must NOT be able to re-sign the good list and pin
+    // themselves as authority.
+    let out = sshare(&f.root, &cfg2)
+        .args([
+            "member",
+            "sign",
+            "--yes",
+            "--identity",
+            mkey.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(!out.status.success(), "member sign hijacked a signed vault");
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("already validly signed"),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    // The real authority (alice) adopting the vault on the new machine is fine.
+    let out = sshare(&f.root, &cfg2)
+        .args(["member", "sign", "--yes", "--identity", alice])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "the real maintainer could not sign: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
 // Second throwaway keypair for the non-maintainer test.
 const MALLORY_PUB: &str = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOzxHqUFE7nQV4hAGBe4RGkxZkdsvpzZhmDViwK/HW+z mallory@sshare-test";
 const MALLORY_KEY: &str = "\

@@ -82,7 +82,12 @@ makes.
 - **`member sign [--yes]`** — the one path that signs an *unverified* list, for a vault that
   predates signing or whose `members.sig` was removed. It reports what the current signature
   says (valid / INVALID / none), prints every member with their key fingerprint, and asks
-  for confirmation (or `--yes`). Refused for a non-authority key.
+  for confirmation (or `--yes`). Refused for a key other than the pinned authority. On a
+  machine with **no** pin yet (a fresh clone), it will not re-sign a list that is *already
+  validly signed* by an unrelated key — it directs you to `sshare trust accept` that signer
+  instead — so it can't silently hand authority to whoever runs it; only when there is no
+  valid signature to adopt (true legacy/recovery) does it sign and TOFU-pin the caller, which
+  it says out loud.
 - **`add` / `rekey` (encrypt-time — the critical enforcement point)** — **verify**
   `members.sig` against the pinned authority *before* encrypting to the recipient set.
   Refuse if the signature is missing, invalid, or by a non-pinned key. This is what stops
