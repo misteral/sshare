@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-02
+
 ### Security
 
 Both issues below were found in the project's first security review (2026-08-28).
@@ -184,7 +186,8 @@ committer controls):
 - `sshare rekey` — re-encrypt every secret for the current member set.
 - Path-traversal-safe, nestable secret names (e.g. `prod/api-token`).
 
-[Unreleased]: https://github.com/misteral/sshare/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/misteral/sshare/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/misteral/sshare/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/misteral/sshare/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/misteral/sshare/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/misteral/sshare/compare/v0.3.0...v0.4.0
