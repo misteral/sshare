@@ -142,6 +142,28 @@ jobs:
               bin.install "sshare"
             end
 
+            def caveats
+              <<~EOS
+                sshare 0.7 changed the on-disk secret format: every encrypted blob is now
+                bound to its vault, and membership changes are verified before signing.
+                Upgrading a team vault from a pre-0.7 version:
+
+                  1. Have every member upgrade to 0.7 first. An older client would print the
+                     new format header along with a secret's value.
+                  2. In each vault, review and migrate existing secrets:
+                       sshare git pull
+                       sshare rekey
+                     If it stops and lists "legacy" (unbound) blobs, check every name is one
+                     you expect (remove an unexpected one with: sshare rm NAME), then:
+                       sshare rekey --migrate-legacy
+                       sshare git push
+                  3. A vault that has members but no signature yet needs: sshare member sign
+
+                Fresh install, or already on 0.7.x: nothing to do.
+                Details: https://github.com/${GITHUB_REPOSITORY}/blob/main/CHANGELOG.md
+              EOS
+            end
+
             test do
               assert_match "sshare", shell_output("#{bin}/sshare --version")
             end
