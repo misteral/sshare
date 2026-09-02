@@ -1,6 +1,7 @@
 # Signed Members List (TOFU)
 
-**Status:** Implemented — 2026-06-23 (ships in v0.2.0) · **Date:** 2026-06-23
+**Status:** Implemented — 2026-06-23 (ships in v0.2.0); amended 2026-08-29 (verify before
+mutate, `member sign`) · **Date:** 2026-06-23
 
 ## Problem
 
@@ -71,10 +72,22 @@ makes.
 - **`init`** — generate the vault-id; the initializer becomes the first authority. The first
   `member add` (signed with the initializer's private key) produces `members.sig` and pins
   that key locally.
-- **`member add` / `member rm`** — must be performed by a maintainer: update
-  `.sshare/members/`, regenerate the canonical set, re-sign `members.sig` with the
-  authority key. If run by a non-authority, the resulting signature won't match other
-  users' pins, so their clients reject the change (the tamper is caught downstream).
+- **`member add` / `member rm`** — must be performed by a maintainer, and (since
+  2026-08-29) **verify before they mutate**: the current `members.sig` must be valid over
+  the current `.sshare/members/` and signed by this machine's pinned authority, and the
+  caller's key must be that authority. Only then: update `.sshare/members/`, regenerate the
+  canonical set, re-sign, and print the signed set (name + key fingerprint). A tampered or
+  unsigned list is refused with nothing written. The sole exception is bootstrap — no
+  signature *and* no members (fresh `init`) — where the caller becomes the authority.
+- **`member sign [--yes]`** — the one path that signs an *unverified* list, for a vault that
+  predates signing or whose `members.sig` was removed. It reports what the current signature
+  says (valid / INVALID / none), prints every member with their key fingerprint, and asks
+  for confirmation (or `--yes`). Refused for a key other than the pinned authority. On a
+  machine with **no** pin yet (a fresh clone), it will not re-sign a list that is *already
+  validly signed* by an unrelated key — it directs you to `sshare trust accept` that signer
+  instead — so it can't silently hand authority to whoever runs it; only when there is no
+  valid signature to adopt (true legacy/recovery) does it sign and TOFU-pin the caller, which
+  it says out loud.
 - **`add` / `rekey` (encrypt-time — the critical enforcement point)** — **verify**
   `members.sig` against the pinned authority *before* encrypting to the recipient set.
   Refuse if the signature is missing, invalid, or by a non-pinned key. This is what stops
@@ -150,6 +163,25 @@ Implementation notes that follow from these:
 - Vault id lives in a dedicated plain-text file `.sshare/id` (not `config.toml`) to avoid
   introducing a TOML parser; generated with the small `getrandom` crate at `init`.
 - The trust pin store lives in the config dir (`src/trust.rs`), keyed by vault id.
+
+## Amendment 2026-08-29: verify before mutate
+
+The original flow above said a non-authority's change is "caught downstream" by `add`/
+`rekey`. The 2026-08 security review found the gap in that reasoning: `member add`/`rm`
+mutated `.sshare/members/` first and then signed **whatever was on disk**, without checking
+the *existing* signature. So a committer could drop `mallory.pub` into the repo — refused by
+everyone's `add`/`rekey`, as designed — and simply wait: the maintainer's next routine
+`member add carol` or `member rm bob` re-signed the whole listing, Mallory included, with
+the authority key. The `rekey` the tool then prompts for encrypted every secret to Mallory.
+No test covered the sequence *inject → maintainer membership change → rekey*.
+
+The fix moves verification to the front of the membership path (`authorize_membership_change`
+in `main.rs`): verify the signed set exactly as `add`/`rekey` do, check the caller is the
+authority, and only then touch the filesystem and re-sign. Refusal writes nothing, so a
+failed attempt no longer leaves a stray `.pub` that desynchronizes the list. The signed set
+is printed with key fingerprints so what was signed is visible. Because a non-empty unsigned
+list can no longer be signed implicitly, `member sign` exists as the explicit, reviewed way
+to do it. `tests/cli.rs` now pins the laundering sequence.
 
 ## Out of scope (v1)
 

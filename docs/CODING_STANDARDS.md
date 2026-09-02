@@ -33,7 +33,10 @@ one-line justification comment.
 - **No `age` types outside `crypto.rs`** (the single allowed exception is the
   `age::ssh::Recipient` return type in `vault.rs`), and **no `ssh-key` types outside
   `sign.rs`**. Each crypto library stays isolated to one module. Likewise, **shelling out to
-  `git` happens only in `git.rs`**. See [ARCHITECTURE.md](ARCHITECTURE.md).
+  `git` happens only in `git.rs`**. See [ARCHITECTURE.md](ARCHITECTURE.md). The isolation
+  rule is about the **binary** (`src/`); the `tests/` integration crate is a separate crate
+  that cannot reach `crypto.rs`'s internals, so it may use `age` directly to build fixtures
+  (e.g. a legacy, unbound blob) — the only place outside `src/crypto.rs` that may.
 - No `println!`-as-logging for diagnostics; `stdout` is reserved for command output (and
   for `get`, raw secret bytes). Diagnostics go to `stderr`.
 

@@ -12,8 +12,18 @@ Prioritized, known debt. Link an item to an execution plan in `active/` when wor
 | `homebrew-core` submission | Low | distribution | Once notable; needs a from-source formula + PR. See [../RELEASING.md](../RELEASING.md). |
 | Decide `ssh-rsa` support | Low | feature | PRD §10.5 — `ssh-ed25519` works today; decide whether to accept RSA keys. |
 | `sshare exec` / `--clip` / `.env` import-export | Low | feature | PRD §10.4 convenience features. |
+| Signed secrets manifest (per-secret provenance) | Low | security | Vault-bound payloads stop `rekey` from re-encrypting *foreign* ciphertext, but nothing yet authenticates *which* secret names/blobs belong in a vault. A manifest signed alongside the member list would; it conflicts with "any member can `add`" and needs design. See [../design-docs/vault-bound-ciphertext.md](../design-docs/vault-bound-ciphertext.md). |
 
 ## Resolved
+
+- **Membership changes verify before mutating** — `member add`/`rm` no longer re-sign an
+  unverified on-disk set (an injected `.pub` could be laundered by the maintainer's next
+  routine change); explicit `member sign` for legacy/recovery (2026-08-29, security review).
+- **Vault-bound ciphertext** — payload header `sshare/1\n<vault-id>\n` makes `rekey`/`get`
+  refuse blobs planted from another vault; `rekey --migrate-legacy` upgrades pre-0.7 blobs
+  (2026-08-29, security review).
+- **Symlink-safe writes** — `write_atomic` refuses symlinked components under the vault root;
+  `secret_names` skips symlinks (2026-08-29).
 
 - **Atomic secret writes** — `write_secret` now writes a temp file + renames (2026-06-22).
 - **End-to-end CLI test** — `tests/cli.rs` drives the built binary (2026-06-22).

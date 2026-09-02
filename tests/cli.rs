@@ -55,6 +55,21 @@ fn add_secret_with(cwd: &Path, cfg: &Path, name: &str, value: &[u8], extra: &[&s
     child.wait_with_output().unwrap()
 }
 
+/// Encrypts `plaintext` to `pubkey` as a bare age blob with **no** sshare vault header — what
+/// every secret written before 0.7 looks like, and what a blob from any other age tool looks
+/// like. Test-only: outside this fixture, `age` is confined to `src/crypto.rs`.
+fn legacy_blob(plaintext: &[u8], pubkey: &str) -> Vec<u8> {
+    let recipient: age::ssh::Recipient = pubkey.parse().unwrap();
+    let encryptor =
+        age::Encryptor::with_recipients(std::iter::once(&recipient as &dyn age::Recipient))
+            .unwrap();
+    let mut out = Vec::new();
+    let mut writer = encryptor.wrap_output(&mut out).unwrap();
+    writer.write_all(plaintext).unwrap();
+    writer.finish().unwrap();
+    out
+}
+
 /// A throwaway vault initialized and signed by "alice" (the maintainer).
 struct Fixture {
     dir: tempfile::TempDir,
@@ -523,6 +538,294 @@ fn autocommit_and_git_passthrough() {
     assert!(
         status2.contains("secrets/"),
         "expected uncommitted secret: {status2}"
+    );
+}
+
+#[test]
+fn maintainer_membership_change_does_not_launder_an_injected_key() {
+    let f = Fixture::setup();
+    let alice = f.key.to_str().unwrap();
+    let alice_pub = f.root.join("alice.pub");
+    assert!(add_secret(&f.root, &f.cfg, "s1", b"x").status.success());
+
+    // A committer drops an unsigned key into the member directory (a plain git commit).
+    std::fs::write(f.root.join(".sshare/members/intruder.pub"), MALLORY_PUB).unwrap();
+
+    // The maintainer's next routine membership change must refuse — not re-sign whatever
+    // is on disk — and must leave nothing behind.
+    let out = sshare(&f.root, &f.cfg)
+        .args([
+            "member",
+            "add",
+            "alice2",
+            "--key",
+            alice_pub.to_str().unwrap(),
+            "--identity",
+            alice,
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        !out.status.success(),
+        "member add re-signed a tampered member list"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("tamper") || stderr.contains("signature"),
+        "stderr: {stderr}"
+    );
+    assert!(
+        !f.root.join(".sshare/members/alice2.pub").exists(),
+        "a stray .pub was written before the check"
+    );
+
+    let out = sshare(&f.root, &f.cfg)
+        .args(["member", "rm", "alice", "--identity", alice])
+        .output()
+        .unwrap();
+    assert!(!out.status.success(), "member rm re-signed a tampered list");
+    assert!(
+        f.root.join(".sshare/members/alice.pub").exists(),
+        "a member was removed before the check"
+    );
+
+    // And encrypt paths still refuse, so the intruder never becomes a recipient.
+    let out = sshare(&f.root, &f.cfg)
+        .args(["rekey", "--identity", alice])
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(!add_secret(&f.root, &f.cfg, "s2", b"y").status.success());
+}
+
+#[test]
+fn member_sign_is_explicit_and_shows_the_set() {
+    let f = Fixture::setup();
+    let alice = f.key.to_str().unwrap();
+    let alice_pub = f.root.join("alice.pub");
+    // A vault from before signing — or one whose signature a committer deleted.
+    std::fs::remove_file(f.root.join(".sshare/members.sig")).unwrap();
+
+    // Membership changes refuse and point at the explicit command.
+    let out = sshare(&f.root, &f.cfg)
+        .args([
+            "member",
+            "add",
+            "bob",
+            "--key",
+            alice_pub.to_str().unwrap(),
+            "--identity",
+            alice,
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        !out.status.success(),
+        "member add bootstrapped a non-empty unsigned list"
+    );
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("member sign"),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(!f.root.join(".sshare/members/bob.pub").exists());
+
+    // Without a terminal, `member sign` needs --yes and signs nothing otherwise.
+    let out = sshare(&f.root, &f.cfg)
+        .args(["member", "sign", "--identity", alice])
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("--yes"),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(!f.root.join(".sshare/members.sig").exists());
+
+    // With --yes it lists every member with a key fingerprint, then signs.
+    let shown = run_ok(
+        &f.root,
+        &f.cfg,
+        &["member", "sign", "--yes", "--identity", alice],
+    );
+    assert!(
+        shown.contains("alice") && shown.contains("SHA256:"),
+        "sign output: {shown}"
+    );
+    assert!(f.root.join(".sshare/members.sig").exists());
+    assert!(add_secret(&f.root, &f.cfg, "s1", b"x").status.success());
+}
+
+#[test]
+fn rekey_refuses_ciphertext_planted_from_another_vault() {
+    // Alice is a recipient in two vaults; a committer in B copies A's ciphertext into B,
+    // hoping Alice's next `rekey` in B re-encrypts it to B's members.
+    let a = Fixture::setup();
+    let b = Fixture::setup();
+    let alice_b = b.key.to_str().unwrap();
+    assert!(
+        add_secret(&a.root, &a.cfg, "db-prod", b"prod-password")
+            .status
+            .success()
+    );
+    assert!(
+        add_secret(&b.root, &b.cfg, "own", b"own-value")
+            .status
+            .success()
+    );
+    std::fs::copy(
+        a.root.join("secrets/db-prod.age"),
+        b.root.join("secrets/planted.age"),
+    )
+    .unwrap();
+
+    let out = sshare(&b.root, &b.cfg)
+        .args(["rekey", "--identity", alice_b])
+        .output()
+        .unwrap();
+    assert!(!out.status.success(), "rekey re-encrypted a foreign blob");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("different vault"), "stderr: {stderr}");
+    assert!(
+        !stderr.contains("prod-password"),
+        "leaked plaintext: {stderr}"
+    );
+
+    let out = sshare(&b.root, &b.cfg)
+        .args(["get", "planted", "--identity", alice_b])
+        .output()
+        .unwrap();
+    assert!(!out.status.success(), "get printed a foreign blob");
+    assert!(!String::from_utf8_lossy(&out.stdout).contains("prod-password"));
+
+    // Removing the planted blob is the way out; everything else still works.
+    run_ok(&b.root, &b.cfg, &["rm", "planted"]);
+    run_ok(&b.root, &b.cfg, &["rekey", "--identity", alice_b]);
+    let out = sshare(&b.root, &b.cfg)
+        .args(["get", "own", "--identity", alice_b])
+        .output()
+        .unwrap();
+    assert_eq!(out.stdout, b"own-value");
+}
+
+#[test]
+fn rekey_migrates_legacy_blobs_only_when_asked() {
+    let f = Fixture::setup();
+    let alice = f.key.to_str().unwrap();
+    assert!(
+        add_secret(&f.root, &f.cfg, "new", b"bound")
+            .status
+            .success()
+    );
+    // A pre-0.7 secret: bare age output with no vault header.
+    std::fs::write(
+        f.root.join("secrets/old.age"),
+        legacy_blob(b"legacy-value", ALICE_PUB),
+    )
+    .unwrap();
+
+    // Reading it still works — legacy blobs are not locked out.
+    let out = sshare(&f.root, &f.cfg)
+        .args(["get", "old", "--identity", alice])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "get failed on a legacy blob: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(out.stdout, b"legacy-value");
+
+    // A plain rekey stops and names the unbound blobs instead of re-encrypting them.
+    let out = sshare(&f.root, &f.cfg)
+        .args(["rekey", "--identity", alice])
+        .output()
+        .unwrap();
+    assert!(
+        !out.status.success(),
+        "rekey silently re-encrypted an unbound blob"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("--migrate-legacy") && stderr.contains("old"),
+        "stderr: {stderr}"
+    );
+
+    // With the flag it migrates; afterwards a plain rekey is clean and the value is intact.
+    let migrated = run_ok(
+        &f.root,
+        &f.cfg,
+        &["rekey", "--migrate-legacy", "--identity", alice],
+    );
+    assert!(migrated.contains("Migrated 1"), "rekey output: {migrated}");
+    run_ok(&f.root, &f.cfg, &["rekey", "--identity", alice]);
+    let out = sshare(&f.root, &f.cfg)
+        .args(["get", "old", "--identity", alice])
+        .output()
+        .unwrap();
+    assert_eq!(out.stdout, b"legacy-value");
+}
+
+#[cfg(unix)]
+#[test]
+fn add_refuses_to_write_through_a_committed_symlink() {
+    let f = Fixture::setup();
+    let outside = f.dir.path().join("outside");
+    std::fs::create_dir(&outside).unwrap();
+    // What a committer could plant: secrets/prod -> somewhere outside the vault.
+    std::os::unix::fs::symlink(&outside, f.root.join("secrets/prod")).unwrap();
+
+    let out = add_secret(&f.root, &f.cfg, "prod/token", b"x");
+    assert!(!out.status.success(), "add wrote through a symlink");
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("symlink"),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        std::fs::read_dir(&outside).unwrap().next().is_none(),
+        "the secret escaped the vault"
+    );
+}
+
+#[test]
+fn member_sign_wont_hijack_an_already_signed_vault_on_a_fresh_machine() {
+    let f = Fixture::setup(); // validly signed by alice
+    let alice = f.key.to_str().unwrap();
+    // A fresh machine = a config home with no pins yet.
+    let cfg2 = f.dir.path().join("cfg2");
+    let mkey = f.root.join("mallory.key");
+    std::fs::write(&mkey, MALLORY_KEY).unwrap();
+
+    // A non-authority who freshly cloned must NOT be able to re-sign the good list and pin
+    // themselves as authority.
+    let out = sshare(&f.root, &cfg2)
+        .args([
+            "member",
+            "sign",
+            "--yes",
+            "--identity",
+            mkey.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(!out.status.success(), "member sign hijacked a signed vault");
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("already validly signed"),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    // The real authority (alice) adopting the vault on the new machine is fine.
+    let out = sshare(&f.root, &cfg2)
+        .args(["member", "sign", "--yes", "--identity", alice])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "the real maintainer could not sign: {}",
+        String::from_utf8_lossy(&out.stderr)
     );
 }
 

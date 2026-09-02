@@ -7,6 +7,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+Both issues below were found in the project's first security review (2026-08-28).
+
+- **Membership changes now verify the member list *before* touching it.** `member add`/`rm`
+  used to re-sign whatever `.pub` files were on disk. A committer could drop an unsigned key
+  into `.sshare/members/`; `add`/`rekey` would refuse the tampered list, but the maintainer's
+  next routine `member add`/`rm` silently signed it in — and the `rekey` the tool then prompts
+  for encrypted every secret to the intruder. Both commands now run the same verification as
+  `add`/`rekey` first, refuse to mutate a tampered or unsigned list, leave no stray file behind
+  on refusal, and print the signed set (name + key fingerprint). Bootstrapping a fresh vault
+  (first `member add` with no members) is unchanged.
+- **Ciphertext is bound to its vault.** `rekey` decrypted every `secrets/*.age` with the
+  operator's key and re-encrypted it to the members, with nothing tying a blob to the vault. A
+  committer in one vault could plant ciphertext from *another* vault that shares a recipient
+  and have that recipient's `rekey` hand them its plaintext. Every blob sshare writes now
+  carries the vault id inside the encrypted payload (`sshare/1\n<vault-id>\n…`); `get`,
+  `ls --descriptions`, and `rekey` refuse a blob bound to a different vault. See
+  [docs/design-docs/vault-bound-ciphertext.md](docs/design-docs/vault-bound-ciphertext.md).
+- Writes refuse to follow a symlink inside the vault, and symlinked entries under `secrets/`
+  are never listed — a committed `secrets/prod -> /elsewhere` can no longer redirect where a
+  secret lands or what `rekey` reads.
+
+A follow-up code review of the fixes above closed the adjacent gaps they exposed (the
+signed-members / vault-binding trust root leans on file, name, and encoding handling a git
+committer controls):
+
+- **The signed member encoding is now unambiguous.** Member `.pub` files are read only if
+  they are plain files (not symlinks, not directories) with an `add`-legal name and a key
+  free of embedded NUL/newline bytes — so one signature can no longer cover two different
+  parsed member sets, a symlinked key can't diverge the canonical bytes per machine, and a
+  directory named `*.pub` can't brick every membership command.
+- **Reads are symlink-safe too** (not just writes): `get`/`rekey` refuse a secret or
+  description reached through a committed symlink, so `rekey` can't abort mid-loop after
+  re-encrypting only some secrets (which would leave a removed member still able to read the
+  rest). `members.sig` and member `.pub` writes also go through the symlink-guarded atomic
+  writer.
+- **Untrusted text is escaped before it reaches the terminal** — a foreign vault id in an
+  error, a committed secret/member name — so a planted name or blob can't inject ANSI escape
+  sequences or forge lines in a review listing.
+- **`member sign` won't hand authority to whoever runs it**: on a machine with no pin yet it
+  refuses to re-sign an already-validly-signed list with an unrelated key (directing you to
+  `trust accept` the real authority), and it states plainly when signing will TOFU-pin you.
+- **A corrupt/missing `.sshare/id` no longer mints a fresh one on read** (which would diverge
+  clones) and no longer blocks reading legacy secrets; the signing key is loaded before the
+  member set is mutated, so a passphrase mistype can't strand a changed set with a stale
+  signature; and `rekey --migrate-legacy` now lists every blob it binds.
+
+### Added
+
+- `sshare member sign [--yes] [--identity <path>]` — review and explicitly sign the member
+  list as-is. It is the only path that signs an *unverified* set, so it prints every member
+  with their key fingerprint and asks for confirmation (`--yes` for scripts). Use it for a
+  vault that predates signing or whose `members.sig` was removed.
+- `sshare rekey --migrate-legacy` — also re-encrypt blobs written before this release (which
+  carry no vault binding). Without the flag `rekey` stops and lists them, so an unexpected name
+  can be spotted and removed instead of re-encrypted.
+
+### Changed
+
+- **Upgrade all clients together.** Secrets written or re-keyed by this version carry the
+  vault header, and a pre-0.7 `sshare get` would print it along with the value. Reading old
+  (unbound) secrets keeps working; run `sshare rekey --migrate-legacy` once, after checking
+  the names it lists, to bring a vault fully onto the bound format.
+- `member add`/`member rm` print the signed member set (with key fingerprints) after
+  re-signing.
+
 ## [0.6.0] - 2026-06-25
 
 ### Added

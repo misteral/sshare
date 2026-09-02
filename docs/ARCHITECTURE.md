@@ -18,8 +18,8 @@ modules (`crypto.rs` = `age`, `sign.rs` = `ssh-key`) and two config-dir stores (
 |---|---|---|
 | `src/main.rs` | clap CLI, all stdin/stdout/file I/O, `~/.ssh` default-key resolution, **vault resolution** (`resolve_vault`), one thin `cmd_*` per subcommand | no |
 | `src/vault.rs` | `Vault` type: on-disk layout, member files, secret blobs, name validation; `discover`/`find_from`/`open` | only to build recipients |
-| `src/crypto.rs` | `encrypt` / `decrypt` / `parse_recipient`, passphrase prompt — the only place `age` types live | **yes (exclusively)** |
-| `src/sign.rs` | SSHSIG `sign`/`verify`/`fingerprint_of` over the member set — the only place `ssh-key` types live | no (`ssh-key`, exclusively) |
+| `src/crypto.rs` | `encrypt` / `decrypt` / `parse_recipient`, the vault-binding payload header, passphrase prompt — the only place `age` types live | **yes (exclusively)** |
+| `src/sign.rs` | SSHSIG `sign`/`verify`/`fingerprint_of`/`pubkey_fingerprint` over the member set — the only place `ssh-key` types live | no (`ssh-key`, exclusively) |
 | `src/registry.rs` | `Registry` of *connected* vaults (name → local path) in the user's config dir; `connect`/`disconnect`/`list`/`path_of` | no |
 | `src/trust.rs` | `TrustStore` — TOFU pin store (vault id → authority fingerprint) in the config dir | no |
 | `src/git.rs` | thin wrapper over the system `git` — autocommit-on-change + the `sshare git` passthrough; the only module that shells out to git | no |
@@ -89,16 +89,28 @@ unregisters and never deletes files.
 
 - **`add`**: read plaintext — a hidden single-line prompt (`rpassword`) when stdin is a
   terminal, else `--file` / `--value` / piped stdin → `vault.recipients()` (all members) →
-  `crypto::encrypt` to every recipient → `vault.write_secret`. Encrypts every secret to
-  **all** members; there is no per-secret granularity yet.
+  `crypto::encrypt` to every recipient, **bound to the vault id** (payload header
+  `sshare/1\n<vault-id>\n`) → `vault.write_secret`. Encrypts every secret to **all**
+  members; there is no per-secret granularity yet.
 - **`rm`**: `vault.remove_secret` deletes the `.age` file, then autocommit. No crypto; not
   gated on trust (it removes, doesn't encrypt).
 - **`get`**: `vault.read_secret` → resolve identity (`--identity` or first of
-  `~/.ssh/{id_ed25519,id_rsa}`) → `crypto::decrypt` → raw bytes to stdout. A non-recipient
-  key simply fails to decrypt — that failure is the access boundary.
-- **`rekey`**: for each secret, decrypt with the caller's key then re-encrypt to the
-  current member set. The caller must still be a recipient of every secret. Run after
-  `member add`/`member rm` to propagate membership changes to existing secrets.
+  `~/.ssh/{id_ed25519,id_rsa}`) → `crypto::decrypt` → raw bytes to stdout (header
+  stripped; byte-exact). A non-recipient key simply fails to decrypt — that failure is the
+  access boundary. A blob bound to *another* vault is refused; a pre-0.7 unbound blob reads
+  fine.
+- **`rekey`**: two phases. First decrypt every secret and description with the caller's key
+  (aborting on anything undecryptable or bound elsewhere, before writing anything); if any
+  blob is unbound and `--migrate-legacy` was not given, stop and list them. Then re-encrypt
+  all of them to the current member set, bound to this vault. The caller must still be a
+  recipient of every secret. Run after `member add`/`member rm` to propagate membership
+  changes to existing secrets. See
+  [design-docs/vault-bound-ciphertext.md](design-docs/vault-bound-ciphertext.md).
+- **`member add` / `member rm`**: `authorize_membership_change` (verify the signed set like
+  `add`/`rekey` do, then check the caller is the pinned authority) → mutate
+  `.sshare/members/` → `sign_members` (re-sign, pin on first use) → print the signed set with
+  key fingerprints. **`member sign`**: the explicit path for an unsigned/legacy list — print
+  the set, confirm (or `--yes`), sign.
 
 ## Tamper-evidence (signed members list)
 
@@ -107,9 +119,11 @@ signs the canonical member set (`vault.canonical_members()`) with their SSH key 
 `sign::sign`; the signature is stored in `.sshare/members.sig`. `add`/`rekey` call
 `verify_members_trusted` *before* encrypting: it verifies the signature (`sign::verify`)
 and checks the signer's fingerprint against the per-vault authority pinned in `trust.rs`
-(TOFU). Membership changes (`member add`/`rm`) re-sign and may only be made by the pinned
-maintainer. The pin lives in the config dir, **outside the repo**, so a committer can't
-forge both. See [design-docs/signed-members-list.md](design-docs/signed-members-list.md).
+(TOFU). Membership changes (`member add`/`rm`) run that same verification **before** they
+mutate anything, may only be made by the pinned maintainer, and re-sign afterwards —
+re-signing an unverified on-disk set would launder an injected key. The pin lives in the
+config dir, **outside the repo**, so a committer can't forge both. See
+[design-docs/signed-members-list.md](design-docs/signed-members-list.md).
 
 ## Access control is the crypto
 

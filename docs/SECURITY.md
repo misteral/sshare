@@ -11,6 +11,8 @@
 | Accidental plaintext commits (secrets are always encrypted before write) | Someone who already read/cached a secret before being revoked |
 | Teammates without a recipient key reading a secret | A forged authority key accepted on a *first* TOFU pin (verify fingerprints out-of-band) |
 | A malicious committer silently adding their own key as a recipient (signed members list + TOFU — see below) | |
+| A committer planting ciphertext from *another* vault so `rekey` re-encrypts it to them (vault-bound payloads — see below) | A blob written before 0.7 has no binding: `rekey` lists such blobs and needs `--migrate-legacy` — the operator must check the names |
+| A committed symlink redirecting where a secret is written or what `rekey` reads | |
 
 ## Access control is the crypto
 
@@ -30,6 +32,43 @@ by re-encryption — never as a role/flag gate that could be bypassed by editing
   bad key fails immediately rather than silently at encrypt time.
 - **Ciphertext is parsed by `age`** on `get`/`rekey`; a non-age blob produces a clear
   error, never a panic.
+- **Neither reads nor writes follow a symlink inside the vault** (`reject_symlinks_under`
+  inspects every component below the root with `symlink_metadata`), and **symlinked entries
+  are never listed or counted**. Lexical name validation cannot see a committed
+  `secrets/prod -> /elsewhere` or a symlinked `members/x.pub`; only the filesystem can, so it
+  is checked on every read and write. This keeps `rekey`'s "decrypt everything before writing
+  anything" atomicity honest — a symlinked blob aborts the run before any secret is rewritten.
+- **The signed member encoding is unambiguous.** A `members/<name>.pub` counts only if it is
+  a plain file with an `add`-legal name and a key carrying no NUL or newline byte; otherwise
+  it is skipped. Without this, `canonical_members` (`name\0pubkey\n`, no escaping) would be
+  non-injective — one signature could cover two different parsed member sets — and a symlink
+  or odd filename could diverge the bytes per machine or brick every membership command.
+- **Untrusted text is escaped before printing** (`crypto::sanitize_for_display`): a foreign
+  vault id in an error, a committed secret or member name in a listing. A planted name or
+  blob therefore cannot inject terminal escape sequences or forge rows in the `member sign`
+  review list.
+- **`.sshare/id` must be one printable token** — it is embedded in the signed member set and
+  in every encrypted payload header. It is read-only: a missing id is never silently minted
+  (that would diverge clones), and a corrupt id does not block reading a legacy secret.
+
+## Vault-bound ciphertext (`rekey` is not a decryption oracle)
+
+`rekey` decrypts every secret with the operator's key and re-encrypts it to the members. If
+blobs were bare `age` files, a committer in vault B could plant ciphertext from vault A —
+any blob encrypted to a key that is a member of both — and B's next `rekey` would hand them
+A's plaintext. So every payload sshare writes starts with `sshare/1\n<vault-id>\n` *inside*
+the ciphertext (age has no associated data; inside is the only place it cannot be
+rewritten without the plaintext):
+
+- `get`, `ls --descriptions`, and `rekey` **refuse** a blob bound to a different vault.
+- A blob with **no header** (pre-0.7, or from another age tool) still `get`s — printing to
+  the operator's own stdout leaks nothing — but `rekey` **stops and lists** every such blob,
+  and only re-encrypts them with `--migrate-legacy`. Re-encrypting is the dangerous step, so
+  it happens only after the operator has seen the names; an unexpected one should be removed.
+- `rekey` decrypts everything *before* writing anything, so one bad blob aborts the run
+  without a half-rekeyed vault.
+
+Design and trade-offs: [design-docs/vault-bound-ciphertext.md](design-docs/vault-bound-ciphertext.md).
 
 ## Secret handling
 
@@ -60,6 +99,16 @@ The member set is the recipient set, so "who can grant decryption" must be as pr
   (`trust.rs`), **outside the repo** — so a committer can't change both the members and the
   pin. `add`/`rekey` **verify** the signature against the pin before encrypting and
   hard-fail on mismatch; only the pinned maintainer may change membership.
+- **Membership changes verify first, then mutate, then re-sign.** `member add`/`rm` run the
+  same verification as `add`/`rekey` *before* touching `.sshare/members/`. Signing whatever
+  is on disk would launder an injected `.pub` into a legitimately signed set the next time the
+  maintainer adds or removes anyone — so a tampered or unsigned list is refused, nothing is
+  written on refusal, and the signed set is printed (name + key fingerprint). The one
+  exception is bootstrap: an unsigned vault with **no** members (fresh `init`).
+- **The only way to sign an unverified list is `member sign`**, which is explicit by design:
+  it prints every member with their key fingerprint and asks for confirmation (`--yes` for
+  scripts). Use it for a vault that predates signing or whose `members.sig` was removed —
+  after checking the list against what teammates actually sent.
 - Design + trust model: [design-docs/signed-members-list.md](design-docs/signed-members-list.md).
 - Residual risk: the **first** pin is trust-on-first-use — verify the authority fingerprint
   out-of-band (it can't be enforced in code). Decryption (`get`) is intentionally not gated

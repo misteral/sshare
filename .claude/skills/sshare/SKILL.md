@@ -78,11 +78,12 @@ target a connected vault from anywhere.
 | `sshare member add <name> [--key <path\|->] [--identity <path>]` | Register a member's SSH **public** key and re-sign the member list (only the maintainer may). |
 | `sshare member ls` | List members. |
 | `sshare member rm <name> [--identity <path>]` | Remove a member and re-sign (then `rekey`, then rotate). |
+| `sshare member sign [--yes] [--identity <path>]` | Review and explicitly sign the member list **as-is**. Prints every member + key fingerprint and asks to confirm; `--yes` skips the prompt (non-interactive shells need it). Only for a vault that predates signing or whose `members.sig` was removed — `member add`/`rm` sign automatically. |
 | `sshare add <name> [--file <path>] [--value <v>] [--description <text>]` | Store/update a secret. **Prompts (hidden) when interactive**; else reads stdin / `--file` / `--value`. Name may nest: `prod/api-token`. `--description` stores an **encrypted** note (omit to keep an existing one; `--description ""` clears it). |
 | `sshare get <name> [--identity <path>]` | Decrypt a secret to **stdout** (raw bytes, no added newline). |
 | `sshare ls [--descriptions] [--identity <path>]` | List stored secret names. With `--descriptions` (`-d`), also decrypt and show each secret's description (needs your SSH key). |
 | `sshare rm <name>` | Remove a stored secret (auto-commits). |
-| `sshare rekey [--identity <path>]` | Re-encrypt every secret for the current member set. Run after add/rm member. |
+| `sshare rekey [--migrate-legacy] [--identity <path>]` | Re-encrypt every secret for the current member set. Run after add/rm member. If it stops listing blobs that "carry no vault binding" (pre-0.7 secrets), **show the user the names**; only if every name is expected, re-run with `--migrate-legacy`. |
 | `sshare git <args…>` | Run git inside the vault: `sshare git push`, `git pull`, `git log`. The only command that touches the network. |
 
 ## Safety rules — read before handling any secret
@@ -103,10 +104,19 @@ target a connected vault from anywhere.
    that person could read — they may already have copies.
 5. **You must be a member** (recipient) to `get`/`rekey`. If not, add your own key first.
 6. **The member list is signed (tamper-evidence).** Changing membership (`member add`/`rm`)
-   re-signs it and is only allowed for the vault's **maintainer** — pass their key with
-   `--identity`. The **first time** you use a vault on a machine, `add`/`rekey` refuse until
-   you run `sshare trust accept` (verify the authority fingerprint out-of-band first).
-   `get` (decrypt) is unaffected by trust.
+   first **verifies** the current signed list, then changes and re-signs it, and is only
+   allowed for the vault's **maintainer** — pass their key with `--identity`. If it refuses
+   with "tampered" / "no signature", **stop and tell the user**: someone changed
+   `.sshare/members/` outside sshare. Never "fix" that by running `member sign` on your own —
+   that command deliberately signs whatever is on disk and is for the maintainer to run after
+   reviewing the printed list. The **first time** you use a vault on a machine, `add`/`rekey`
+   refuse until you run `sshare trust accept` (verify the authority fingerprint out-of-band
+   first). `get` (decrypt) is unaffected by trust.
+7. **Never re-encrypt blobs you can't account for.** If `rekey` stops because some blobs
+   "carry no vault binding", or `get`/`rekey` say a blob is "bound to a different vault",
+   show the user the names — a blob nobody added may be ciphertext planted from another
+   vault. `--migrate-legacy` is only for confirmed pre-0.7 secrets; `sshare rm <name>` removes
+   a planted one.
 
 ## Task recipes (plain request → commands)
 
@@ -222,17 +232,31 @@ with your `~/.ssh/id_ed25519.pub`, then `sshare git pull` — now `sshare get` w
   trade-off: `sshare ls --descriptions` must decrypt with your SSH key, and descriptions are
   invisible to non-recipients (web review, CI). They re-encrypt on `rekey`, so a newly added
   member can read them and a removed one cannot. Only their existence/length leaks to the repo.
-- **The member list is signed; changes need the maintainer key.** `member add`/`rm` re-sign
-  with `--identity` and only the pinned maintainer may change membership. The first signer of
-  a vault becomes its authority. On a new machine, `add`/`rekey` require `sshare trust accept`
-  first (TOFU). Bootstrapping a vault you created (`init` + first `member add`) auto-pins you.
+- **The member list is signed; changes need the maintainer key.** `member add`/`rm` verify
+  the current signature, then re-sign with `--identity`; only the pinned maintainer may change
+  membership. The first signer of a vault becomes its authority. On a new machine, `add`/
+  `rekey` require `sshare trust accept` first (TOFU). Bootstrapping a vault you created
+  (`init` + first `member add`) auto-pins you. A vault with members but **no** signature
+  (pre-signing, or `members.sig` deleted) refuses `member add`/`rm` until the maintainer runs
+  `sshare member sign` (interactive; `--yes` for scripts) after reviewing the printed list.
+- **Secrets are bound to their vault (0.7+).** Every blob carries the vault id inside the
+  encrypted payload; `get`/`rekey`/`ls -d` refuse a blob "bound to a different vault". Blobs
+  from before 0.7 have no binding: `get` reads them fine, but `rekey` stops and lists them
+  until run with `--migrate-legacy` (one-time, after checking the names). **All clients on a
+  vault must upgrade together** — an old `sshare get` would print the header along with a new
+  secret's value.
 - Common errors: `not inside a vault — pass --vault <name>` (run `sshare vaults`, then use
   `--vault`, or `cd` into the repo); `no connected vault named '<n>'` (run `sshare vaults`
   to see the real names, or `sshare connect` it); `not yet trusted … run 'sshare trust
   accept'` (first use on this machine — verify out-of-band, then accept); `member list … may
-  have been tampered with` (the members changed without a valid maintainer signature);
-  `only this vault's maintainer … can change membership` (you signed with a non-authority
-  key); `decryption failed — is your SSH key a recipient?` (not a member / wrong key).
+  have been tampered with` (the members changed without a valid maintainer signature — also
+  refuses `member add`/`rm`; tell the user, don't work around it); `has members but no
+  signature … 'sshare member sign'` (unsigned legacy vault or deleted `members.sig` — the
+  maintainer reviews and signs explicitly); `only this vault's maintainer … can change
+  membership` (you signed with a non-authority key); `decryption failed — is your SSH key a
+  recipient?` (not a member / wrong key); `blob(s) carry no vault binding … --migrate-legacy`
+  (pre-0.7 secrets — show the names, then migrate once if all are expected); `bound to a
+  different vault` (ciphertext copied in from another vault — `sshare rm` it).
 - **The registry stores only names + local paths** in `~/.config/sshare/vaults` — never
   secrets, never git remotes. A `missing` status in `sshare vaults` means the path moved or
   was deleted; reconnect it with `sshare connect <new-path> --name <n>`.
