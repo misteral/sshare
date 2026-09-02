@@ -194,13 +194,19 @@ See [docs/design-docs/git-integration.md](docs/design-docs/git-integration.md).
   access, but they may already have copies of secrets they could read. Rotate those.
 - Prefer piping secrets via **stdin** over `--value`, which is visible in shell history
   and the process list.
+- **Security review.** sshare had its first internal, adversarial security review in 2026-08
+  (fixes shipped in v0.7.0): the signed-members flow and vault-binding were hardened against a
+  malicious repo committer. This is an *internal* review, **not** a third-party audit — see
+  [ADR-0001](docs/adr/0001-first-security-review.md) and [docs/SECURITY.md](docs/SECURITY.md).
 
 ## Status
 
-v0.2 — core flow (init / members / add / get / ls / rekey), **connected vaults**
-(`connect` / `vaults` / global `--vault`), and a **signed, tamper-evident member list**
-(TOFU — `trust` / `trust accept`). Every secret is still encrypted to **all** members.
-Planned next (see [`PRD.md`](./PRD.md) and
+Current: **v0.7.0** — core flow (init / members / add / get / ls / rekey), **connected
+vaults** (`connect` / `vaults` / global `--vault`), a **signed, tamper-evident member list**
+(TOFU — `trust` / `trust accept`), **encrypted descriptions**, and — from the first security
+review — **vault-bound ciphertext** plus verify-before-mutate membership and `member sign`
+(see [ADR-0001](docs/adr/0001-first-security-review.md)). Every secret is still encrypted to
+**all** members. Planned next (see [`PRD.md`](./PRD.md) and
 [the tech-debt tracker](docs/exec-plans/tech-debt-tracker.md)): per-secret recipients and
 groups (`grant`/`revoke`), multi-maintainer signing, and supply-chain hardening (release
 provenance + signed tags).

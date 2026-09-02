@@ -27,6 +27,7 @@ Rust edition 2024 (≥ 1.85). See [docs/TESTING.md](docs/TESTING.md).
 |---|---|
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Module map (crypto/sign/registry/trust), layering, vault resolution, signed-members flow, on-disk layout |
 | [docs/SECURITY.md](docs/SECURITY.md) | Threat model, access-control-is-crypto, signed members (TOFU), boundary rules, revocation caveat |
+| [docs/adr/](docs/adr/) | Architecture Decision Records (numbered): first security review & security posture (ADR-0001) |
 | [docs/CODING_STANDARDS.md](docs/CODING_STANDARDS.md) | Edition, lints-as-gates, error handling, forbidden patterns |
 | [docs/TESTING.md](docs/TESTING.md) | Running checks/tests, single test, test layout, manual E2E |
 | [docs/RELEASING.md](docs/RELEASING.md) | Tag → cross-build → GitHub Release → Homebrew formula; versioning, changelog |
